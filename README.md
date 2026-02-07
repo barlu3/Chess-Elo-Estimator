@@ -72,8 +72,8 @@ The input of our project would include choosing to either play with another play
 > 4. Run ``git checkout sf_14.1``
 > 5. Compile using ``make build ARCH=x86-64``
 > 6. Navigate to ../../test/
-> 7. Compile using ``make``
-> 8. Run ``./bin/runChess``
+> 8. Compile using ``cmake . | make``
+> 9. Run ``./bin/runChess``
 
 ## Testing
 > * Our project was tested and validated through Continuous Integration with a repeatedly updated main.yml file to run all googletests after each input. Pull requests were used to evaluate code quality and manual testing on individual machines was also performed.
