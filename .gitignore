@@ -1,0 +1,11 @@
+chess
+saves
+/test/Makefile
+/test/CMakeCache.txt
+/test/cmake_install.cmake
+/test/lib
+/test/CMakeFiles
+/test/bin
+.vscode
+/test/_deps
+test/CTestTestfile.cmake

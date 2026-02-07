@@ -1,0 +1,27 @@
+name: CI
+
+on: 
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps: 
+
+    - uses: actions/checkout@v4
+      with: 
+        submodules: recursive
+        fetch-depth: 0
+
+    #Runs all tests under test/test.cpp
+    - name: Building lab
+      run: |
+        cd test
+        cmake .
+        make
+        bin/runAllTests

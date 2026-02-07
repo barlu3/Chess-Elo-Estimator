@@ -1,0 +1,6 @@
+[submodule "test/googletest"]
+	path = test/googletest
+	url = https://github.com/google/googletest.git
+[submodule "Stockfish"]
+	path = Stockfish
+	url = https://github.com/official-stockfish/Stockfish.git
