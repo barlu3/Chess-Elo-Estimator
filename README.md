@@ -6,6 +6,7 @@ Author: Luke Baring https://github.com/barlu3
 ## Project Description
 
 This project is built off a chess engine I built for my CS100 project at UCR along with several other engineers (Andres Solorio https://github.com/Andres-55, Temuulen Tserenchimed https://github.com/ttser002, Jeremiah Rodriguez https://github.com/JeremiahDRodriguez). 
+
 In this, I design a Chess MiniMax algorithm that uses alpha-beta pruning and quiescence searching to optimize game state evaluation. I also explore data collection by fixing time constraints per engine move (1ms, 50ms, 100ms) and benchmarking this engine against established Chess bots/engines (Stockfish at different levels of difficulty).
 
 ## Installation/Usage
