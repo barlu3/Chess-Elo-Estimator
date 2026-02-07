@@ -13,7 +13,7 @@ This project is built off a chess engine I built for my CS100 project at UCR alo
 > * CMake Version 3.20 or higher.
 > * C++17 or higher.
 ### To Run this Application
-> 1. Clone this repository inside your IDE using ``git clone --recursive https://github.com/cs100/final-project-lbari008-jrodr675-ttser002-asolo061.git``
+> 1. Clone this repository inside your IDE using ``git clone --recursive https://github.com/barlu3/Chess-Elo-Estimator.git``
 > 2. Run ``git submodules update --init --recursive``
 > 3. Navigate to Stockfish/src/
 > 4. Run ``git checkout sf_14.1``
