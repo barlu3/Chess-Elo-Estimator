@@ -31,6 +31,7 @@ add_executable(runAllTests
     ../src/app/user/FileManager.cpp
     ../src/app/user/AccountManager.cpp
     ../src/app/StockfishAI.cpp
+    ../engine/eval/material.cc
 )
 
 add_executable(runChess
@@ -53,6 +54,7 @@ add_executable(runChess
     ../src/app/user/FileManager.cpp
     ../src/app/user/AccountManager.cpp
     ../src/app/StockfishAI.cpp
+    ../engine/eval/material.cc
 )
 
 target_link_libraries(runChess)

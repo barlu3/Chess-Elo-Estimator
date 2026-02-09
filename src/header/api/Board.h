@@ -15,6 +15,7 @@ class Board {
         Board(const Board& other);
         Board& operator=(const Board& other);
         
+        const std::vector<Piece*> Pieces() const;
         const Piece* getPiece(int row, int column) const;
         void setPiece(int row, int column, Piece* piece);
         void movePiece(const Move& move);

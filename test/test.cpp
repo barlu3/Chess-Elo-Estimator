@@ -17,6 +17,7 @@
 #include "../src/header/interface/UI.h"
 #include "../src/header/interface/Menu.h"
 #include "../src/header/user/AccountManager.h"
+#include "../engine/eval/material.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
@@ -479,7 +480,7 @@ TEST(Pawn, PawnPinnedHasNoMoves) {
 }
 
 TEST(Pawn, PawnPromoOnEmptyBoardHas21Moves) {
-Board b;
+    Board b;
     for (int r=0; r<8; r++) {
         for (int c = 0; c<8; c++) {
             b.removePiece(r,c);
@@ -819,8 +820,7 @@ private:
     std::streambuf* cinBuffer;
 };
 
-TEST(MenuTest, DisplaysMainMenuCorrectly)
-{
+TEST(MenuTest, DisplaysMainMenuCorrectly) {
     Menu menu("Bob", false);
 
     CinRedirect input("5\n"); //exiting program
@@ -836,8 +836,7 @@ TEST(MenuTest, DisplaysMainMenuCorrectly)
     EXPECT_NE(output.find("5. Exit"), std::string::npos);
 }
 
-TEST(MenuTest, GuestCannotLoadGames)
-{
+TEST(MenuTest, GuestCannotLoadGames) {
     Menu menu("Guest", true);
 
     CinRedirect input("2\n5\n");
@@ -850,8 +849,7 @@ TEST(MenuTest, GuestCannotLoadGames)
     EXPECT_NE(output.find("Guests cannot load games."), std::string::npos);
 }
 
-TEST(MenuTest, DisplaySubMenu)
-{
+TEST(MenuTest, DisplaySubMenu) {
     Menu menu("Bob", false);
 
     CinRedirect input("1\n3\n5\n");
@@ -865,8 +863,7 @@ TEST(MenuTest, DisplaySubMenu)
     EXPECT_NE(output.find("Play Against Bot"), std::string::npos);
 }
 
-TEST(MenuTest, DisplayRemovingFile)
-{
+TEST(MenuTest, DisplayRemovingFile) {
     std::filesystem::create_directories("../saves/testUser");
     SaveGame saver;
     Board b;
@@ -993,4 +990,36 @@ TEST(MoveHistoryVectorTest, undoThreeTurns) {
     }
 
     EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
+}
+
+//---------------------
+//EVALUATOR TESTS
+//---------------------
+
+TEST(EvaluatorTest, startingValueIsZero) {
+    Game game;
+
+    EXPECT_EQ(Evaluator::evaluate(game), 0);
+}
+
+TEST(EvaluatorTest, PerspectiveFlipsWithSideToMove) {
+    Game game;
+
+    game.setTurn(false);
+    EXPECT_EQ(Evaluator::evaluate(game), 0);
+}
+
+TEST(EvaluatorTest, WhiteUpQueen) {
+    Game game;
+    game.getBoard().removePiece(0,3);
+
+    EXPECT_EQ(Evaluator::evaluate(game), 900);
+}
+
+TEST(EvaluatorTest, PerspectiveWithMaterialAdvantage) {
+    Game game;
+    game.getBoard().removePiece(0,3);
+    game.setTurn(false);
+
+    EXPECT_EQ(Evaluator::evaluate(game), -900);
 }

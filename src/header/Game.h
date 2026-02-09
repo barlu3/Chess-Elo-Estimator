@@ -29,7 +29,7 @@ class Game {
         }
 
         //const method
-        bool& isWhiteTurn() {
+        bool isWhiteTurn() const {
             return whiteTurn;
         }
 

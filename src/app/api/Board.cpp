@@ -94,7 +94,17 @@ Board& Board::operator=(const Board& other) {
     return *this;
 }
 
-
+const vector<Piece*> Board::Pieces() const {
+    std::vector<Piece*> pieces;
+    for (int row = 0 ; row < 8; row++) {
+        for (int col = 0 ; col < 8; col++) {
+            if (board[row][col]) {
+                pieces.push_back(board[row][col]);
+            }
+        }
+    }
+    return pieces;
+}
 const Piece* Board::getPiece(int row, int column) const {
     return board[row][column];
 }
