@@ -21,9 +21,9 @@ In this, I design a Chess MiniMax algorithm that uses alpha-beta pruning and qui
 > 4. Run ``git checkout sf_14.1``
 > 5. Compile using ``make build ARCH=x86-64``
 > 6. Navigate to ../../test/
-> 8. Compile using ``cmake . | make``
+> 8. Compile using ``cmake .`` then ``make``
 > 9. Run ``./bin/runChess``
 
 ## Testing
-> * This project was tested and validated through Continuous Integration with a repeatedly updated main.yml file to run all googletests after each input. Manual testing on MacOS and Windows machines was also performed.
+> * This project was tested and validated through Continuous Integration with a repeatedly updated main.yml file to run all googletests after each input. Manual testing on MacOS and Windows (using WSL) machines was also performed.
  
