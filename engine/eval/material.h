@@ -1,7 +1,6 @@
 #ifndef MATERIAL_H
 #define MATERIAL_H
 
-#include "api/Board.h"
 #include "Game.h"
 
 class Evaluator {
