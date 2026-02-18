@@ -39,7 +39,9 @@ class Game {
             if (piece == nullptr) throw std::runtime_error("No piece on square");
             
             if (piece->getColor() != whiteTurn) {
-                throw std::runtime_error("Wrong player's turn");
+                return false;
+                //removed through exception since it indicated bug in UI which no longer appears
+                //we want to filter through skipped moves
             }
 
             auto legalMoves = piece->generateMoves(board, false);

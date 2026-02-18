@@ -32,6 +32,7 @@ add_executable(runAllTests
     ../src/app/user/AccountManager.cpp
     ../src/app/StockfishAI.cpp
     ../engine/eval/material.cc
+    ../engine/search/src/negamax.cc
 )
 
 add_executable(runChess
@@ -55,6 +56,7 @@ add_executable(runChess
     ../src/app/user/AccountManager.cpp
     ../src/app/StockfishAI.cpp
     ../engine/eval/material.cc
+    ../engine/search/src/negamax.cc
 )
 
 target_link_libraries(runChess)

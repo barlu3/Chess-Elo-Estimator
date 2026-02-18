@@ -20,7 +20,7 @@ long long Evaluator::evaluate(const Game& game) {
     long long score = 0;
 
     for (const Piece* p : game.getBoard().Pieces()) {
-        int value = materialValue(p->symbol());
+        long long value = materialValue(p->symbol());
 
         if (p->getColor()) { score += value; }
         else { score -= value; }

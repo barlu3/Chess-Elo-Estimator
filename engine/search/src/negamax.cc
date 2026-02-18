@@ -1,6 +1,6 @@
 #include "Game.h"
-#include "Board.h"
 #include "Pieces.h"
+#include "api/Board.h"
 #include "api/moveHistory.h"
 #include "api/undoMove.h"
 #include "api/convertMoveToString.h"
@@ -17,7 +17,9 @@ long long NegaMax::negamax(Game& game, moveHistory& history, int depth) {
     for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
             if (!game.getBoard().isEmpty(r,c)) {
-                auto pieceMoves = game.getBoard().getPiece(r,c)->generateMoves(game.getBoard(), false);
+                const Piece* piece = game.getBoard().getPiece(r,c);
+                if (piece->getColor() != game.isWhiteTurn()) continue;
+                auto pieceMoves = piece->generateMoves(game.getBoard(), false);
                 moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
             }
         }
@@ -30,7 +32,7 @@ long long NegaMax::negamax(Game& game, moveHistory& history, int depth) {
     long long best = -1e18;
     for (const Move& move : moves) {
         std::string record = convertMoveToString::moveAsString(move, game.getBoard());
-        game.performMove(move);                                                                 //pseudo perform the move
+        if (!game.performMove(move)) continue;                                                                 //pseudo perform the move
         history.appendLatestMove(record);     //append latest move to move history
         long long score = -negamax(game, history, depth - 1);                                   //recursively calculate the best move
         undoMove::undoLatestMove(history, game.getBoard());                                     //undo all the pseudo moves

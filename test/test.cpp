@@ -17,6 +17,8 @@
 #include "../src/header/interface/UI.h"
 #include "../src/header/interface/Menu.h"
 #include "../src/header/user/AccountManager.h"
+
+#include "../engine/search/header/negamax.h"
 #include "../engine/eval/material.h"
 
 #include "../src/header/api/sub/Pawn.h"
@@ -1022,4 +1024,235 @@ TEST(EvaluatorTest, PerspectiveWithMaterialAdvantage) {
     game.setTurn(false);
 
     EXPECT_EQ(Evaluator::evaluate(game), -900);
+}
+
+// ─────────────────────────────────────────────
+// Helper: count material on board for one color
+// Used to verify board state is fully restored
+// ─────────────────────────────────────────────
+static long long countMaterial(const Board& board, bool white) {
+    long long total = 0;
+    for (const Piece* p : board.Pieces()) {
+        if (p->getColor() == white) {
+            char t = std::tolower(static_cast<unsigned char>(p->symbol()));
+            switch (t) {
+                case 'p': total += 100; break;
+                case 'n': total += 320; break;
+                case 'b': total += 330; break;
+                case 'r': total += 500; break;
+                case 'q': total += 900; break;
+            }
+        }
+    }
+    return total;
+}
+
+// Helper: build an empty board with all squares cleared
+static Board emptyBoard() {
+    Board b;
+    for (int r = 0; r < 8; r++)
+        for (int c = 0; c < 8; c++)
+            b.removePiece(r, c);
+    return b;
+}
+
+// ─────────────────────────────────────────────
+// Depth-0 Tests
+// ─────────────────────────────────────────────
+
+// At depth 0, negamax must return exactly what Evaluator::evaluate returns.
+// No moves should be searched — validates the base case short-circuit.
+TEST(NegaMaxTest, DepthZeroMatchesEvaluator) {
+    Game game;
+    moveHistory history;
+
+    long long evalScore   = Evaluator::evaluate(game);
+    long long searchScore = NegaMax::negamax(game, history, 0);
+
+    EXPECT_EQ(evalScore, searchScore);
+}
+
+// Starting position is material-equal so depth-0 score must be exactly 0.
+TEST(NegaMaxTest, DepthZeroStartingPositionIsZero) {
+    Game game;
+    moveHistory history;
+
+    EXPECT_EQ(NegaMax::negamax(game, history, 0), 0LL);
+}
+
+// ─────────────────────────────────────────────
+// Perspective / Symmetry Tests
+// ─────────────────────────────────────────────
+
+// Removing black's queen gives white a +900 material advantage.
+// With white to move the score should be positive.
+TEST(NegaMaxTest, WhiteUpQueenIsPositive) {
+    Game game;
+    moveHistory history;
+
+    game.getBoard().removePiece(0, 3);  // remove black queen at d8
+
+    long long score = NegaMax::negamax(game, history, 0);
+    EXPECT_EQ(score, 900LL);
+}
+
+// Same imbalance but black to move — score must flip to negative.
+// This validates the side-to-move normalization in the evaluator.
+TEST(NegaMaxTest, PerspectiveFlipsWithSideToMove) {
+    Game game;
+    moveHistory history;
+
+    game.getBoard().removePiece(0, 3);  // remove black queen
+    game.setTurn(false);                // black to move
+
+    long long score = NegaMax::negamax(game, history, 0);
+    EXPECT_EQ(score, -900LL);
+}
+
+// Starting position with black to move should still be 0 (symmetric material).
+TEST(NegaMaxTest, StartingPositionSymmetricForBlack) {
+    Game game;
+    moveHistory history;
+
+    game.setTurn(false);
+
+    EXPECT_EQ(NegaMax::negamax(game, history, 0), 0LL);
+}
+
+// ─────────────────────────────────────────────
+// Terminal Position Tests
+// ─────────────────────────────────────────────
+
+// Stalemate: no legal moves, king NOT in check → must return exactly 0.
+// Position: white king b6, white queen b1, black king a8 — black to move.
+TEST(NegaMaxTest, StalemateReturnsZero) {
+    Board b = emptyBoard();
+
+   b.setPiece(0, 7, new King(0, 7, false));  // black king  h8 — row 0, col 7
+    b.setPiece(1, 5, new Queen(1, 5, true));  // white queen f7 — row 1, col 5
+    b.setPiece(2, 6, new King(2, 6, true));   // white king  g6 — row 2, col 6
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(false);  // black to move
+
+    ASSERT_TRUE(game.getBoard().isStalemate(false))
+        << "Setup error: position should be stalemate for black";
+
+    moveHistory history;
+    long long score = NegaMax::negamax(game, history, 1);
+    EXPECT_EQ(score, 0LL);
+}
+
+// Checkmate: no legal moves, king IS in check → must return large negative.
+// Position: white king b6, white queen a1, black king a8 — black to move.
+TEST(NegaMaxTest, CheckmateReturnsLargeNegative) {
+    Board b = emptyBoard();
+
+    // White queen at a1 (row 7, col 0) covers a-file → checks black king
+    // White king at b6 (row 2, col 1) covers escape squares
+    // Black king at a8 (row 0, col 0) — no legal moves
+    b.setPiece(0, 0, new King(0, 0, false));
+    b.setPiece(2, 2, new King(2, 2, true));
+    b.setPiece(1, 1, new Queen(1, 1, true));
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(false);  // black to move — checkmated
+
+    ASSERT_TRUE(game.getBoard().isCheckMate(false))
+        << "Setup error: position should be checkmate for black";
+
+    moveHistory history;
+    long long score = NegaMax::negamax(game, history, 1);
+    EXPECT_LT(score, -10000LL);
+}
+
+// ─────────────────────────────────────────────
+// Move Quality Tests
+// ─────────────────────────────────────────────
+
+// A free queen capture must be found at depth 1.
+TEST(NegaMaxTest, FindsFreeQueenCapture) {
+    Board b = emptyBoard();
+
+    // Bare minimum: both kings + white pawn + undefended black queen
+    b.setPiece(7, 4, new King(7, 4, true));   // white king e1
+    b.setPiece(0, 4, new King(0, 4, false));  // black king e8
+    b.setPiece(4, 3, new Pawn(4, 3, true));   // white pawn d4
+    b.setPiece(3, 4, new Queen(3, 4, false)); // black queen e5 — pawn can capture, nothing defends
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(true);
+
+    moveHistory history;
+    long long score = NegaMax::negamax(game, history, 1);
+    EXPECT_GE(score, 100LL);
+}
+
+// ─────────────────────────────────────────────
+// Board & History Integrity Tests
+// ─────────────────────────────────────────────
+
+// After negamax completes, white and black material must be identical to before.
+// This is the most important correctness test — catches any make/undo mismatch.
+TEST(NegaMaxTest, BoardMaterialRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+
+    NegaMax::negamax(game, history, 2);
+
+    long long whiteAfter = countMaterial(game.getBoard(), true);
+    long long blackAfter = countMaterial(game.getBoard(), false);
+
+    EXPECT_EQ(whiteBefore, whiteAfter)
+        << "White material changed after negamax — undoMove is not restoring correctly";
+    EXPECT_EQ(blackBefore, blackAfter)
+        << "Black material changed after negamax — undoMove is not restoring correctly";
+}
+
+// moveHistory must be in the exact same state before and after search.
+// Validates that appendLatestMove and undoLatestMove are perfectly balanced.
+TEST(NegaMaxTest, HistorySizeRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    size_t sizeBefore  = history.moveHistoryVector.size();
+    int    stateBefore = history.currentBoardState;
+
+    NegaMax::negamax(game, history, 2);
+
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore)
+        << "moveHistoryVector leaked entries after negamax";
+    EXPECT_EQ(history.currentBoardState, stateBefore)
+        << "currentBoardState was not restored after negamax";
+}
+
+// The whiteTurn flag on Game must not be mutated by search.
+TEST(NegaMaxTest, TurnUnchangedAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    bool turnBefore = game.isWhiteTurn();
+    NegaMax::negamax(game, history, 2);
+
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore)
+        << "whiteTurn flag was not restored after negamax";
+}
+
+// Running negamax twice on the same unchanged position must return the same score.
+// Non-determinism here means search is silently corrupting state between calls.
+TEST(NegaMaxTest, DeterministicOnSamePosition) {
+    Game game1, game2;
+    moveHistory h1, h2;
+
+    long long score1 = NegaMax::negamax(game1, h1, 2);
+    long long score2 = NegaMax::negamax(game2, h2, 2);
+
+    EXPECT_EQ(score1, score2)
+        << "negamax returned different scores on identical positions — state is leaking";
 }
