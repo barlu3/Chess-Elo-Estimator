@@ -9,7 +9,7 @@
 class convertMoveToString {
     public:
         convertMoveToString() = default;
-        std::string moveAsString(Move move, Board currentBoard);
+        static std::string moveAsString(Move move, Board currentBoard);
 };
 
 #endif

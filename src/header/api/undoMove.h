@@ -6,7 +6,7 @@
 
 class undoMove {
     public:
-        void undoLatestMove(moveHistory& currentGame, Board& currentBoard);
+        static void undoLatestMove(moveHistory& currentGame, Board& currentBoard);
 };
 
 #endif

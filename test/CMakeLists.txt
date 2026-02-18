@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
 
-include_directories( ../src/header ../src/header/sub)
+include_directories( ../src/header ../src/header/sub ../engine)
 
 ADD_SUBDIRECTORY(googletest)
 
