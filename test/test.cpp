@@ -18,8 +18,9 @@
 #include "../src/header/interface/Menu.h"
 #include "../src/header/user/AccountManager.h"
 
-#include "../engine/search/header/negamax.h"
 #include "../engine/eval/material.h"
+#include "../engine/search/header/negamax.h"
+#include "../engine/search/header/alphabeta.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
@@ -1255,4 +1256,16 @@ TEST(NegaMaxTest, DeterministicOnSamePosition) {
 
     EXPECT_EQ(score1, score2)
         << "negamax returned different scores on identical positions — state is leaking";
+}
+
+//ALPHA BETA TEST SUITES
+TEST(AlphaBetaTest, MatchesNegamaxScore) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    long long negamaxScore  = NegaMax::negamax(g1, h1, 3);
+    long long alphabetaScore = AlphaBeta::alphabeta(g2, h2, 3, -1e18, 1e18);
+
+    EXPECT_EQ(negamaxScore, alphabetaScore)
+        << "Alpha-beta returned different score than negamax on same position";
 }
