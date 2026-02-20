@@ -1269,3 +1269,200 @@ TEST(AlphaBetaTest, MatchesNegamaxScore) {
     EXPECT_EQ(negamaxScore, alphabetaScore)
         << "Alpha-beta returned different score than negamax on same position";
 }
+static const long long INF = 1e18;
+// ─────────────────────────────────────────────
+// Correctness: must match negamax exactly
+// ─────────────────────────────────────────────
+
+// Alpha-beta must return the same score as negamax at every depth.
+// If any of these fail, the cutoff logic is wrong.
+TEST(AlphaBetaTest, MatchesNegamaxDepth1) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    EXPECT_EQ(
+        NegaMax::negamax(g1, h1, 1),
+        AlphaBeta::alphabeta(g2, h2, 1, -INF, INF)
+    );
+}
+
+TEST(AlphaBetaTest, MatchesNegamaxDepth2) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    EXPECT_EQ(
+        NegaMax::negamax(g1, h1, 2),
+        AlphaBeta::alphabeta(g2, h2, 2, -INF, INF)
+    );
+}
+
+TEST(AlphaBetaTest, MatchesNegamaxDepth3) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    EXPECT_EQ(
+        NegaMax::negamax(g1, h1, 3),
+        AlphaBeta::alphabeta(g2, h2, 3, -INF, INF)
+    );
+}
+
+// Same correctness check but with black to move.
+TEST(AlphaBetaTest, MatchesNegamaxBlackToMove) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    g1.setTurn(false);
+    g2.setTurn(false);
+
+    EXPECT_EQ(
+        NegaMax::negamax(g1, h1, 2),
+        AlphaBeta::alphabeta(g2, h2, 2, -INF, INF)
+    );
+}
+
+// ─────────────────────────────────────────────
+// Depth-0 base case
+// ─────────────────────────────────────────────
+
+TEST(AlphaBetaTest, DepthZeroMatchesEvaluator) {
+    Game game;
+    moveHistory history;
+
+    EXPECT_EQ(
+        Evaluator::evaluate(game),
+        AlphaBeta::alphabeta(game, history, 0, -INF, INF)
+    );
+}
+
+TEST(AlphaBetaTest, DepthZeroStartingPositionIsZero) {
+    Game game;
+    moveHistory history;
+
+    EXPECT_EQ(AlphaBeta::alphabeta(game, history, 0, -INF, INF), 0LL);
+}
+
+// ─────────────────────────────────────────────
+// Terminal positions
+// ─────────────────────────────────────────────
+
+// FEN: 7k/5Q2/6K1/8/8/8/8/8 b - - 0 1 — stalemate for black
+TEST(AlphaBetaTest, StalemateReturnsZero) {
+    Board b = emptyBoard();
+    b.setPiece(0, 7, new King(0, 7, false));
+    b.setPiece(1, 5, new Queen(1, 5, true));
+    b.setPiece(2, 6, new King(2, 6, true));
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(false);
+
+    ASSERT_TRUE(game.getBoard().isStalemate(false))
+        << "Setup error: position should be stalemate for black";
+
+    moveHistory history;
+    EXPECT_EQ(AlphaBeta::alphabeta(game, history, 1, -INF, INF), 0LL);
+}
+
+// FEN: 6k1/5QK1/8/8/8/8/8/8 b - - 0 1 — checkmate for black
+TEST(AlphaBetaTest, CheckmateReturnsLargeNegative) {
+    Board b = emptyBoard();
+    b.setPiece(0, 6, new King(0, 6, false));
+    b.setPiece(1, 5, new Queen(1, 5, true));
+    b.setPiece(1, 6, new King(1, 6, true));
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(false);
+
+    ASSERT_TRUE(game.getBoard().isCheckMate(false))
+        << "Setup error: position should be checkmate for black";
+
+    moveHistory history;
+    EXPECT_LT(AlphaBeta::alphabeta(game, history, 1, -INF, INF), -10000LL);
+}
+
+// ─────────────────────────────────────────────
+// Pruning-specific behavior
+// ─────────────────────────────────────────────
+
+// If alpha >= beta on entry, the node should be pruned immediately.
+// Score returned must be <= beta (the upper bound we passed in).
+TEST(AlphaBetaTest, ImmediateBetaCutoffWhenWindowClosed) {
+    Game game;
+    moveHistory history;
+
+    // Pass a closed window: alpha == beta == 0
+    // Any score found will trigger cutoff immediately
+    long long score = AlphaBeta::alphabeta(game, history, 2, 0, 0);
+
+    // With a zero window, we expect beta returned (0) or lower
+    EXPECT_LE(score, 0LL);
+}
+
+// A very high alpha (better than anything reachable) should cause
+// immediate cutoffs everywhere — score must be <= alpha passed in.
+TEST(AlphaBetaTest, HighAlphaCausesImmediateCutoffs) {
+    Game game;
+    moveHistory history;
+
+    long long score = AlphaBeta::alphabeta(game, history, 2, 100000LL, INF);
+
+    // Nothing can beat alpha=100000 from starting position, so beta cutoff
+    EXPECT_LE(score, 100000LL);
+}
+
+// ─────────────────────────────────────────────
+// Integrity: board and history must be restored
+// ─────────────────────────────────────────────
+
+TEST(AlphaBetaTest, BoardMaterialRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+
+    AlphaBeta::alphabeta(game, history, 2, -INF, INF);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore)
+        << "White material changed — undoMove is leaking";
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore)
+        << "Black material changed — undoMove is leaking";
+}
+
+TEST(AlphaBetaTest, HistorySizeRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    size_t sizeBefore  = history.moveHistoryVector.size();
+    int    stateBefore = history.currentBoardState;
+
+    AlphaBeta::alphabeta(game, history, 2, -INF, INF);
+
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore)
+        << "moveHistoryVector leaked entries";
+    EXPECT_EQ(history.currentBoardState, stateBefore)
+        << "currentBoardState was not restored";
+}
+
+TEST(AlphaBetaTest, TurnUnchangedAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    bool turnBefore = game.isWhiteTurn();
+    AlphaBeta::alphabeta(game, history, 2, -INF, INF);
+
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore)
+        << "whiteTurn flag was not restored after search";
+}
+
+TEST(AlphaBetaTest, DeterministicOnSamePosition) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    long long score1 = AlphaBeta::alphabeta(g1, h1, 3, -INF, INF);
+    long long score2 = AlphaBeta::alphabeta(g2, h2, 3, -INF, INF);
+
+    EXPECT_EQ(score1, score2)
+        << "alphabeta is non-deterministic on identical positions";
+}
