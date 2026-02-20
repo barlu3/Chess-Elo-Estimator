@@ -6,12 +6,12 @@
 #include "api/convertMoveToString.h"
 
 #include "search/header/alphabeta.h"
-#include "eval/material.h"
+#include "search/header/quiescence.h"
 
 #include <vector>
 
 long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long long alpha, long long beta) {
-    if (depth == 0) return Evaluator::evaluate(game);
+    if (depth == 0) return Quiescence::quiescence(game);
 
     std::vector<Move> moves;
     for (int r = 0 ; r < 8; r++) {
