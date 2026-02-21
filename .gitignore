@@ -9,3 +9,4 @@ saves
 .vscode
 /test/_deps
 test/CTestTestfile.cmake
+valgrind_output.txt

@@ -20,6 +20,7 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
                 const Piece* piece = game.getBoard().getPiece(r,c);
                 if(piece->getColor() != game.isWhiteTurn()) continue;
                 auto pieceMoves = piece->generateMoves(game.getBoard(), false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
             }
         }
     }
