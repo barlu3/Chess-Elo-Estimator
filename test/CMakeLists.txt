@@ -34,6 +34,7 @@ add_executable(runAllTests
     ../engine/eval/material.cc
     ../engine/search/src/negamax.cc
     ../engine/search/src/alphabeta.cc
+    ../engine/search/src/quiescence.cc
 )
 
 add_executable(runChess
@@ -59,6 +60,7 @@ add_executable(runChess
     ../engine/eval/material.cc
     ../engine/search/src/negamax.cc
     ../engine/search/src/alphabeta.cc
+    ../engine/search/src/quiescence.cc
 )
 
 target_link_libraries(runChess)

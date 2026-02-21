@@ -20,7 +20,7 @@ long long Quiescence::quiescence(Game& game, moveHistory& history, long long alp
     std::vector<Move> captures;
     for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; r++) {
-            if (!game.getBoard().isEmpty()) {
+            if (!game.getBoard().isEmpty(r, c)) {
                 const Piece* piece = game.getBoard().getPiece(r,c);
                 if (piece->getColor() != game.isWhiteTurn()) continue;
                 auto pieceMoves = piece->generateMoves(game.getBoard(), false);

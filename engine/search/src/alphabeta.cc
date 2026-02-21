@@ -11,7 +11,7 @@
 #include <vector>
 
 long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long long alpha, long long beta) {
-    if (depth == 0) return Quiescence::quiescence(game);
+    if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta);
 
     std::vector<Move> moves;
     for (int r = 0 ; r < 8; r++) {
