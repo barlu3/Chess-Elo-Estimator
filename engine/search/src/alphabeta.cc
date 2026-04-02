@@ -44,3 +44,47 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
     }
     return alpha;
 }
+
+SearchResult AlphaBeta::search(Game& game, moveHistory& history, int depth) {
+    static const long long INF = 1e18;
+    Board board = game.getBoard();
+
+    std::vector<Move> moves;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (!board.isEmpty(r,c)) {
+                const Piece* piece = board.getPiece(r,c);
+                if (piece->getColor() != game.isWhiteTurn()) continue;
+                auto pieceMoves = piece->generateMoves(board, false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
+            }
+        }
+    }
+
+    MoveOrder::orderMoves(moves, board);
+
+    SearchResult result;
+    result.score = -INF;
+    result.bestMove = moves.empty() ? Move{-1, -1, -1, -1} : moves[0];
+
+    long long alpha = -INF;
+    long long beta = INF;
+
+    for (auto move : moves) {
+        std::string record = convertMoveToString::moveAsString(move, board);
+        if (!game.performMove(move)) continue;
+        history.appendLatestMove(record);
+
+        long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
+
+        undoMove::undoLatestMove(history, board);
+
+        if (score > result.score) {
+            result.score = score;
+            result.bestMove = move;
+        }
+        if (score > alpha) alpha = score;
+    }
+
+    return result;
+}
