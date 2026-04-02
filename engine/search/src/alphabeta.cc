@@ -7,6 +7,7 @@
 
 #include "search/header/alphabeta.h"
 #include "search/header/quiescence.h"
+#include "search/header/ordering.h"
 
 #include <vector>
 
@@ -14,6 +15,7 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
     if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta);
 
     std::vector<Move> moves;
+
     for (int r = 0 ; r < 8; r++) {
         for (int c = 0 ; c < 8 ; c++) {
             if (!game.getBoard().isEmpty(r,c)) {
@@ -26,7 +28,8 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
     }
 
     if (moves.empty()) return game.getBoard().isInCheck(game.isWhiteTurn()) ? -100000 : 0;
-
+    
+    MoveOrder::orderMoves(moves, game.getBoard());
     for (const Move& move : moves) {
         std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!game.performMove(move)) continue;

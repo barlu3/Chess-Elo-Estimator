@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <algorithm> 
 #include <fstream>
+#include <iostream>
 
 
 #include "../src/header/api/Board.h"
@@ -21,6 +22,7 @@
 #include "../engine/eval/material.h"
 #include "../engine/search/header/negamax.h"
 #include "../engine/search/header/alphabeta.h"
+#include "../engine/search/header/ordering.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
@@ -1465,4 +1467,155 @@ TEST(AlphaBetaTest, DeterministicOnSamePosition) {
 
     EXPECT_EQ(score1, score2)
         << "alphabeta is non-deterministic on identical positions";
+}
+
+// ─────────────────────────────────────────────
+// MOVE ORDERING TESTS
+// ─────────────────────────────────────────────
+
+// Helper: returns true if all captures precede all quiet moves in the list
+static bool capturesBeforeQuiets(const std::vector<Move>& moves, const Board& board) {
+    bool seenQuiet = false;
+    for (const Move& m : moves) {
+        const Piece* attacker = board.getPiece(m.fromRow, m.fromCol);
+        if (attacker == nullptr) continue;
+        bool isCapture = board.isEnemy(m.toRow, m.toCol, attacker->getColor());
+        if (isCapture && seenQuiet) return false;
+        if (!isCapture) seenQuiet = true;
+    }
+    return true;
+}
+
+// After ordering, no moves should be added or dropped
+TEST(MoveOrderTest, SizeUnchangedAfterOrdering) {
+    Board b = emptyBoard();
+    b.setPiece(4, 4, new Queen(4, 4, true));
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(2, 4, new Pawn(2, 4, false));
+    b.setPiece(3, 3, new Knight(3, 3, false));
+
+    std::vector<Move> moves;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (!b.isEmpty(r, c) && b.getPiece(r, c)->getColor() == true) {
+                auto pieceMoves = b.getPiece(r, c)->generateMoves(b, false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
+            }
+        }
+    }
+
+    size_t sizeBefore = moves.size();
+    MoveOrder::orderMoves(moves, b);
+    EXPECT_EQ(moves.size(), sizeBefore)
+        << "orderMoves dropped or added moves";
+}
+
+// All captures must appear before any quiet move
+TEST(MoveOrderTest, CapturesBeforeQuiets) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 4, new Queen(4, 4, true));
+    b.setPiece(4, 6, new Pawn(4, 6, false));    // capturable by queen
+    b.setPiece(4, 2, new Knight(4, 2, false));  // capturable by queen
+
+    std::vector<Move> moves;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (!b.isEmpty(r, c) && b.getPiece(r, c)->getColor() == true) {
+                auto pieceMoves = b.getPiece(r, c)->generateMoves(b, false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
+            }
+        }
+    }
+
+    MoveOrder::orderMoves(moves, b);
+    EXPECT_TRUE(capturesBeforeQuiets(moves, b))
+        << "A quiet move appeared before a capture after ordering";
+}
+
+// Pawn takes queen must be ordered before queen takes pawn (MVV-LVA)
+TEST(MoveOrderTest, MVVLVAOrderedCorrectly) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+
+    // white pawn at d4 can take black queen at e5 — score = 900 - 100 = 800
+    b.setPiece(4, 3, new Pawn(4, 3, true));
+    b.setPiece(3, 4, new Queen(3, 4, false));
+
+    // white queen at a1 can take black pawn at a5 — score = 100 - 900 = -800
+    b.setPiece(7, 0, new Queen(7, 0, true));
+    b.setPiece(3, 0, new Pawn(3, 0, false));
+
+    std::vector<Move> moves;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (!b.isEmpty(r, c)) {
+                auto pieceMoves = b.getPiece(r, c)->generateMoves(b, false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
+            }
+        }
+    }
+
+    MoveOrder::orderMoves(moves, b);
+
+    // Find the index of pawn-takes-queen and queen-takes-pawn in the ordered list
+    int pawnTakesQueenIdx = -1;
+    int queenTakesPawnIdx = -1;
+    for (int i = 0; i < (int)moves.size(); i++) {
+        const Piece* attacker = b.getPiece(moves[i].fromRow, moves[i].fromCol);
+        const Piece* victim   = b.getPiece(moves[i].toRow,   moves[i].toCol);
+        if (attacker == nullptr || victim == nullptr) continue;
+
+        char a = std::tolower(attacker->symbol());
+        char v = std::tolower(victim->symbol());
+
+        if (a == 'p' && v == 'q') pawnTakesQueenIdx = i;
+        if (a == 'q' && v == 'p') queenTakesPawnIdx = i;
+    }
+
+    ASSERT_NE(pawnTakesQueenIdx, -1) << "pawn-takes-queen move not found";
+    ASSERT_NE(queenTakesPawnIdx, -1) << "queen-takes-pawn move not found";
+    EXPECT_LT(pawnTakesQueenIdx, queenTakesPawnIdx)
+        << "pawn-takes-queen should appear before queen-takes-pawn (MVV-LVA)";
+}
+
+// Position with no captures at all — ordering must not crash and list is valid
+TEST(MoveOrderTest, NoCapturesStable) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    // only kings, no captures possible for white
+
+    std::vector<Move> moves;
+    auto kingMoves = b.getPiece(7, 4)->generateMoves(b, false);
+    moves.insert(moves.end(), kingMoves.begin(), kingMoves.end());
+
+    size_t sizeBefore = moves.size();
+    EXPECT_NO_THROW(MoveOrder::orderMoves(moves, b));
+    EXPECT_EQ(moves.size(), sizeBefore);
+}
+
+// Equal-value captures (rook takes rook) should both appear before quiet moves
+TEST(MoveOrderTest, EqualValueCapturesBeforeQuiets) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 0, new Rook(4, 0, true));   // white rook
+    b.setPiece(4, 7, new Rook(4, 7, false));  // black rook — capturable
+
+    std::vector<Move> moves;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (!b.isEmpty(r, c) && b.getPiece(r, c)->getColor() == true) {
+                auto pieceMoves = b.getPiece(r, c)->generateMoves(b, false);
+                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
+            }
+        }
+    }
+
+    MoveOrder::orderMoves(moves, b);
+    EXPECT_TRUE(capturesBeforeQuiets(moves, b));
 }
