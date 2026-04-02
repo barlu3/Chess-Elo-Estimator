@@ -23,6 +23,7 @@
 #include "../engine/search/header/negamax.h"
 #include "../engine/search/header/alphabeta.h"
 #include "../engine/search/header/ordering.h"
+#include "../engine/search/header/iterdeep.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
