@@ -170,8 +170,8 @@ void Menu::startBotGame(int difficulty) {
 
             if (move.fromRow == -3) {
                 if (moveHistory.moveHistoryVector.size() >= 2) {
-                    undoMove.undoLatestMove(moveHistory, game.getBoard());
-                    undoMove.undoLatestMove(moveHistory, game.getBoard());
+                    undoMove.undoLatestMove(moveHistory, game.getBoard(), game);
+                    undoMove.undoLatestMove(moveHistory, game.getBoard(), game);
                 }
                 else {
                     std::cout << "To early to undo move.\n";

@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <iostream>
 
 static double expectedScore(int ratingA, int ratingB) {
     return 1.0 / (1.0 + std::pow(10.0, (ratingB - ratingA) / 400.0));
@@ -36,7 +37,7 @@ class Game {
         bool performMove(const Move& move) {
             const Piece* piece = board.getPiece(move.fromRow, move.fromCol);
 
-            if (piece == nullptr) throw std::runtime_error("No piece on square");
+            if (piece == nullptr) return false; //no piece on square just return false ?
             
             if (piece->getColor() != whiteTurn) {
                 return false;

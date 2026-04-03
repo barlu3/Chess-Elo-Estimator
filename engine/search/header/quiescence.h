@@ -6,7 +6,7 @@
 
 class Quiescence {
     public:
-        static long long quiescence(Game& game, moveHistory& history, long long alpha, long long beta);
+        static long long quiescence(Game& game, moveHistory& history, long long alpha, long long beta, int checkDepth);
 };
 
 #endif

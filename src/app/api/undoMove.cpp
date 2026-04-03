@@ -1,3 +1,5 @@
+#include "Game.h"
+
 #include "api/undoMove.h"
 #include "api/sub/Rook.h"
 #include "api/sub/Queen.h"
@@ -8,7 +10,7 @@
 
 #include <iostream>
 
-void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard) {
+void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard, Game& game) {
     if (currentGame.currentBoardState >= 1) {
         std::string lastMove = currentGame.moveHistoryVector.back();
         
@@ -207,7 +209,7 @@ void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard) {
         }
 
         currentBoard.removePiece(currentX, currentY);
-
+        
         switch (capturedPiece) {
             // pawn
             case 'p': {
@@ -284,6 +286,7 @@ void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard) {
 
         currentGame.currentBoardState -= 1;
         currentGame.moveHistoryVector.pop_back();
+        game.setTurn(!game.isWhiteTurn());
 
     } else {
         std::cout << "To early to undo any move.\n";

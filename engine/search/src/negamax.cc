@@ -30,12 +30,14 @@ long long NegaMax::negamax(Game& game, moveHistory& history, int depth) {
     }
 
     long long best = -1e18;
-    for (const Move& move : moves) {
+    for (auto move : moves) {
         std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!game.performMove(move)) continue;                                                                 //pseudo perform the move
         history.appendLatestMove(record);     //append latest move to move history
+
         long long score = -negamax(game, history, depth - 1);                                   //recursively calculate the best move
-        undoMove::undoLatestMove(history, game.getBoard());                                     //undo all the pseudo moves
+        
+        undoMove::undoLatestMove(history, game.getBoard(), game);                                     //undo all the pseudo moves
         best = std::max(best,score);                                                            //set best score
     }
     return best;

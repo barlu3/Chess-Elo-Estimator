@@ -915,7 +915,7 @@ TEST(MoveHistoryVectorTest, appendNewMovesTest) {
 }
 
 TEST(MoveHistoryVectorTest, undoDefaultBoardTest) {
-    Board newBoard;
+    Game game;
     moveHistory moveHistory;
     undoMove undo;
 
@@ -923,7 +923,7 @@ TEST(MoveHistoryVectorTest, undoDefaultBoardTest) {
     std::streambuf* oldCout = std::cout.rdbuf();
     std::cout.rdbuf(ss.rdbuf());
 
-    undo.undoLatestMove(moveHistory, newBoard);
+    undo.undoLatestMove(moveHistory, game.getBoard(), game);
 
     std::cout.rdbuf(oldCout);
 
@@ -931,7 +931,7 @@ TEST(MoveHistoryVectorTest, undoDefaultBoardTest) {
 }
 
 TEST(MoveHistoryVectorTest, undoFirstTwoMoves) {
-    Board newBoardWithMoves;
+    Game game;
     moveHistory moveHistoryDefault;
     moveHistory moveHistoryWithMoves;
     undoMove undo;
@@ -941,24 +941,24 @@ TEST(MoveHistoryVectorTest, undoFirstTwoMoves) {
 
     convertMoveToString converter;
 
-    std::string moveStr1 = converter.moveAsString(move1, newBoardWithMoves);
-    newBoardWithMoves.movePiece(move1);
+    std::string moveStr1 = converter.moveAsString(move1, game.getBoard());
+    game.getBoard().movePiece(move1);
     moveHistoryWithMoves.appendLatestMove(moveStr1);
 
-    std::string moveStr2 = converter.moveAsString(move2, newBoardWithMoves);
-    newBoardWithMoves.movePiece(move2);
+    std::string moveStr2 = converter.moveAsString(move2, game.getBoard());
+    game.getBoard().movePiece(move2);
     moveHistoryWithMoves.appendLatestMove(moveStr2);
 
     ASSERT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), 2);
-    undo.undoLatestMove(moveHistoryWithMoves, newBoardWithMoves);
-    undo.undoLatestMove(moveHistoryWithMoves, newBoardWithMoves);
+    undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
+    undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
 
     EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
 }
 
 TEST(MoveHistoryVectorTest, undoThreeTurns) {
-    Board newBoard;
-    Board newBoardWithMoves;
+    Game game1;
+    Game game2;
     moveHistory moveHistoryDefault;
     moveHistory moveHistoryWithMoves;
     undoMove undo;
@@ -973,26 +973,26 @@ TEST(MoveHistoryVectorTest, undoThreeTurns) {
 
     convertMoveToString converter;
 
-    std::string moveStr1 = converter.moveAsString(move1, newBoard);
+    std::string moveStr1 = converter.moveAsString(move1, game1.getBoard());
     moveHistoryDefault.appendLatestMove(moveStr1);
 
-    moveStr1 = converter.moveAsString(move1, newBoardWithMoves);
+    moveStr1 = converter.moveAsString(move1, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr1);
-    std::string moveStr2 = converter.moveAsString(move2, newBoardWithMoves);
+    std::string moveStr2 = converter.moveAsString(move2, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr2);
-    std::string moveStr3 = converter.moveAsString(move3, newBoardWithMoves);
+    std::string moveStr3 = converter.moveAsString(move3, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr3);
-    std::string moveStr4 = converter.moveAsString(move4, newBoardWithMoves);
+    std::string moveStr4 = converter.moveAsString(move4, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr4);
-    std::string moveStr5 = converter.moveAsString(move5, newBoardWithMoves);
+    std::string moveStr5 = converter.moveAsString(move5, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr5);
-    std::string moveStr6 = converter.moveAsString(move6, newBoardWithMoves);
+    std::string moveStr6 = converter.moveAsString(move6, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr6);
-    std::string moveStr7 = converter.moveAsString(move7, newBoardWithMoves);
+    std::string moveStr7 = converter.moveAsString(move7, game2.getBoard());
     moveHistoryWithMoves.appendLatestMove(moveStr7);
 
     for (unsigned i = 0; i < 6; ++i) {
-        undo.undoLatestMove(moveHistoryWithMoves, newBoardWithMoves);
+        undo.undoLatestMove(moveHistoryWithMoves, game2.getBoard(), game2);
     }
 
     EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
@@ -1619,4 +1619,163 @@ TEST(MoveOrderTest, EqualValueCapturesBeforeQuiets) {
 
     MoveOrder::orderMoves(moves, b);
     EXPECT_TRUE(capturesBeforeQuiets(moves, b));
+}
+
+// ─────────────────────────────────────────────
+// AlphaBeta::search() TESTS
+// ─────────────────────────────────────────────
+
+// search() must return a valid move, not the sentinel {-1,-1,-1,-1}
+TEST(SearchTest, ReturnsValidMove) {
+    Game game;
+    moveHistory history;
+
+    SearchResult result = AlphaBeta::search(game, history, 1);
+
+    EXPECT_NE(result.bestMove.fromRow, -1) << "search() returned sentinel move";
+    EXPECT_NE(result.bestMove.fromCol, -1);
+    EXPECT_NE(result.bestMove.toRow,   -1);
+    EXPECT_NE(result.bestMove.toCol,   -1);
+}
+
+// search() must find the only mating move in a mate-in-one position.
+// FEN: 6k1/5QK1/8/8/8/8/8/8 w - - 0 1
+// White queen on f7 delivers checkmate — any other move lets black survive.
+TEST(SearchTest, FindsMateInOne) {
+    
+    Game game;
+    game.setBoard(emptyBoard());
+    game.setTurn(true);
+
+    game.getBoard().setPiece(0, 6, new King(0, 6, false));   // black king  g8
+    game.getBoard().setPiece(2, 5, new Queen(2, 5, true));   // white queen f7
+    game.getBoard().setPiece(2, 6, new King(2, 6, true));    // white king  g7
+
+    moveHistory history;
+
+    SearchResult result = AlphaBeta::search(game, history, 1);          
+
+    // After playing the best move, black must be in checkmate
+    game.performMove(result.bestMove);
+
+    EXPECT_TRUE(game.getBoard().isCheckMate(false))
+        << "search() did not find the mating move";
+}
+
+// search() must prefer capturing a free queen over any quiet move
+// passes
+TEST(SearchTest, PrefersFreeCaptureOverQuiet) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 3, new Pawn(4, 3, true));    // white pawn d4
+    b.setPiece(3, 4, new Queen(3, 4, false));  // undefended black queen e5
+
+    Game game;
+    game.setBoard(b);
+    game.setTurn(true);
+
+    moveHistory history;
+    SearchResult result = AlphaBeta::search(game, history, 1);
+
+    // Best move must be pawn captures queen: (4,3) -> (3,4)
+    EXPECT_EQ(result.bestMove.fromRow, 4);
+    EXPECT_EQ(result.bestMove.fromCol, 3);
+    EXPECT_EQ(result.bestMove.toRow,   3);
+    EXPECT_EQ(result.bestMove.toCol,   4)
+        << "search() did not capture the free queen";
+}
+
+// Board and history must be fully restored after search()
+TEST(SearchTest, BoardAndHistoryRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+    size_t    sizeBefore  = history.moveHistoryVector.size();
+    int       stateBefore = history.currentBoardState;
+    bool      turnBefore  = game.isWhiteTurn();
+
+    AlphaBeta::search(game, history, 2);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
+    EXPECT_EQ(history.currentBoardState, stateBefore);
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore);
+}
+
+// search() score must be deterministic across two identical positions
+TEST(SearchTest, DeterministicOnSamePosition) {
+    Game g1, g2;
+    moveHistory h1, h2;
+
+    SearchResult r1 = AlphaBeta::search(g1, h1, 2);
+    SearchResult r2 = AlphaBeta::search(g2, h2, 2);
+
+    EXPECT_EQ(r1.score, r2.score)
+        << "search() returned different scores on identical positions";
+}
+
+// ─────────────────────────────────────────────
+// IterDeep::search() TESTS
+// ─────────────────────────────────────────────
+
+// IterDeep must always return a valid move even with a very tight time limit
+TEST(IterDeepTest, AlwaysReturnsValidMove) {
+    Game game;
+    moveHistory history;
+
+    // minDepth=1 guarantees at least one completed search
+    SearchResult result = IterDeep::search(game, history, 1, 1);
+
+    EXPECT_NE(result.bestMove.fromRow, -1) << "IterDeep returned sentinel move";
+    EXPECT_NE(result.bestMove.fromCol, -1);
+    EXPECT_NE(result.bestMove.toRow,   -1);
+    EXPECT_NE(result.bestMove.toCol,   -1);
+}
+
+// On a simple position IterDeep and AlphaBeta::search must agree on score at depth 1
+//passes
+TEST(IterDeepTest, MatchesAlphaBetaAtDepth1) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 3, new Pawn(4, 3, true));
+    b.setPiece(3, 4, new Queen(3, 4, false));
+
+    Game g1, g2;
+    g1.setBoard(b); g1.setTurn(true);
+    g2.setBoard(b); g2.setTurn(true);
+
+    moveHistory h1, h2;
+
+    SearchResult abResult    = AlphaBeta::search(g1, h1, 1);
+    // generous time limit so iterdeep completes depth 1 comfortably
+    SearchResult iterResult  = IterDeep::search(g2, h2, 5000, 1, 1);
+
+    EXPECT_EQ(abResult.score, iterResult.score)
+        << "IterDeep and AlphaBeta::search disagree on score at depth 1";
+}
+
+// Board and history must be fully restored after IterDeep::search()
+// does not pass all the time, suspecting seg error
+TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
+    Game game;
+    moveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+    size_t    sizeBefore  = history.moveHistoryVector.size();
+    int       stateBefore = history.currentBoardState;
+    bool      turnBefore  = game.isWhiteTurn();
+
+    IterDeep::search(game, history, 100, 2);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
+    EXPECT_EQ(history.currentBoardState, stateBefore);
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore);
 }

@@ -11,13 +11,18 @@
 #include <vector>
 
 //ensures that we care about captures instead of moves that have little to no affect on the game
-long long Quiescence::quiescence(Game& game, moveHistory& history, long long alpha, long long beta) {
-    long long standPat = Evaluator::evaluate(game);
+long long Quiescence::quiescence(Game& game, moveHistory& history, long long alpha, long long beta, int checkDepth) {
+    bool inCheck = game.getBoard().isInCheck(game.isWhiteTurn());
+    
+    //only take standPat if not in check, otherwise we need to find a legal move to get out
+    if (!inCheck) {
+        long long standPat = Evaluator::evaluate(game);
 
-    if (standPat >= beta) return beta;
-    if (standPat > alpha) alpha = standPat;
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
+    }   
 
-    std::vector<Move> captures;
+    std::vector<Move> moves;
     for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
             if (!game.getBoard().isEmpty(r, c)) {
@@ -25,22 +30,28 @@ long long Quiescence::quiescence(Game& game, moveHistory& history, long long alp
                 if (piece->getColor() != game.isWhiteTurn()) continue;
                 auto pieceMoves = piece->generateMoves(game.getBoard(), false);
                 for (const Move& m : pieceMoves) {
-                    if (game.getBoard().isEnemy(m.toRow, m.toCol, game.isWhiteTurn())) {
-                        captures.push_back(m);
+                    bool isCapture = game.getBoard().isEnemy(m.toRow, m.toCol, game.isWhiteTurn());
+                    //include checks within checkDepth budget (if checkDepth = 0 we cant consider checks)
+                    bool givesCheck = (checkDepth > 0) && game.getBoard().isInCheckAfterMove(m, !game.isWhiteTurn());
+                    if (isCapture || inCheck || givesCheck) {
+                        moves.push_back(m);
                     }
                 }
             }
         }
     }
 
-    for (const Move& move : captures) {
+    //if we're in check with no moves, its a checkmate
+    if (inCheck && moves.empty()) return -100000;
+
+    for (auto move : moves) {
         std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!game.performMove(move)) continue;
         history.appendLatestMove(record);
 
-        long long score = -quiescence(game, history, -beta, -alpha);
+        long long score = -quiescence(game, history, -beta, -alpha, checkDepth - 1);
 
-        undoMove::undoLatestMove(history, game.getBoard());
+        undoMove::undoLatestMove(history, game.getBoard(), game);
 
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;
