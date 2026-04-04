@@ -1,4 +1,4 @@
-[![CI](https://github.com/barlu3/Chess-Elo-Estimator/workflows/main.yml/badge.svg)](https://github.com/barlu3/Chess-Elo-Estimator/workflows/main.yml)
+[![CI](https://github.com/barlu3/Chess-Elo-Estimator/actions/workflows/main.yml/badge.svg)](https://github.com/barlu3/Chess-Elo-Estimator/actions/workflows/main.yml)
 
 # Chess Elo Estimator
 Author: Luke Baring https://github.com/barlu3
