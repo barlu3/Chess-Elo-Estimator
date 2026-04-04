@@ -38,6 +38,8 @@ add_executable(runAllTests
     ../src/app/StockfishAI.cpp
 
     ../engine/eval/material.cc
+    ../engine/eval/tables/src/pst.cc
+
     ../engine/search/src/negamax.cc
     ../engine/search/src/alphabeta.cc
     ../engine/search/src/quiescence.cc
@@ -74,11 +76,15 @@ add_executable(runChess
     ../src/app/StockfishAI.cpp
     
     ../engine/eval/material.cc
+    ../engine/eval/tables/src/pst.cc
+
     ../engine/search/src/negamax.cc
     ../engine/search/src/alphabeta.cc
     ../engine/search/src/quiescence.cc
     ../engine/search/src/ordering.cc
     ../engine/search/src/iterdeep.cc
+
+
 )
 
 target_link_libraries(runChess)
