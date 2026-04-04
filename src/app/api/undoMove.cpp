@@ -28,13 +28,15 @@ void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard, Gam
             //en Passant with black pawn
             case 'p': {
                 Pawn* newBlackPawn = new Pawn(previousX, previousY, false);
-                Pawn* newWhitePawn = new Pawn(currentX, previousY, true);
+                Pawn* newWhitePawn = new Pawn(previousX, currentY, true);       //debugging
+                // Pawn* newWhitePawn = new Pawn(currentX, previousY, true);
                 
                 newWhitePawn->setEnPassant(true);
 
                 currentBoard.setPiece(previousX, previousY, newBlackPawn);
                 currentBoard.removePiece(currentX, currentY);
-                currentBoard.setPiece(currentX, previousY, newWhitePawn);
+                currentBoard.setPiece(previousX, currentY, newWhitePawn);
+                // currentBoard.setPiece(currentX, previousY, newWhitePawn);
 
                 currentGame.currentBoardState -= 1;
                 currentGame.moveHistoryVector.pop_back();
@@ -44,13 +46,15 @@ void undoMove::undoLatestMove(moveHistory& currentGame, Board& currentBoard, Gam
             //en Passant with white pawn
             case 'P': {
                 Pawn* newWhitePawn = new Pawn(previousX, previousY, true);
-                Pawn* newBlackPawn = new Pawn(currentX, previousY, false);
+                Pawn* newBlackPawn = new Pawn(previousX, currentY, false);
+                // Pawn* newBlackPawn = new Pawn(currentX, previousY, false);
                 
                 newBlackPawn->setEnPassant(true);
 
                 currentBoard.setPiece(previousX, previousY, newWhitePawn);
                 currentBoard.removePiece(currentX, currentY);
-                currentBoard.setPiece(currentX, previousY, newBlackPawn);
+                currentBoard.setPiece(previousX, currentY, newBlackPawn);
+                // currentBoard.setPiece(currentX, previousY, newBlackPawn);
 
                 currentGame.currentBoardState -= 1;
                 currentGame.moveHistoryVector.pop_back();
