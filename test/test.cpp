@@ -1771,7 +1771,15 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     int       stateBefore = history.currentBoardState;
     bool      turnBefore  = game.isWhiteTurn();
 
-    IterDeep::search(game, history, 100, 1);
+    IterDeep::search(game, history, 100, 1, 3);
+
+    long long whiteAfter = countMaterial(game.getBoard(), true);
+    long long blackAfter = countMaterial(game.getBoard(), false);
+    
+    std::cout << "white: " << whiteBefore << " -> " << whiteAfter << "\n";
+    std::cout << "black: " << blackBefore << " -> " << blackAfter << "\n";
+    std::cout << "history size: " << history.moveHistoryVector.size() << "\n";
+    std::cout << "board state: " << history.currentBoardState << "\n";
 
     EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
     EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
