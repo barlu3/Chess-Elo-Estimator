@@ -1779,3 +1779,84 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     EXPECT_EQ(history.currentBoardState, stateBefore);
     EXPECT_EQ(game.isWhiteTurn(), turnBefore);
 }
+
+TEST(IterDeepTest, BoardRestoredSimplePosition) {
+    Game game;
+    moveHistory history;
+
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 4, new Queen(4, 4, true));
+    game.setBoard(b);
+    game.setTurn(true);
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+
+    IterDeep::search(game, history, 100, 1, 6);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true), whiteBefore)
+        << "White material changed after IterDeep — undoMove is leaking";
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore)
+        << "Black material changed after IterDeep — undoMove is leaking";
+}
+
+TEST(IterDeepTest, HistoryRestoredSimplePosition) {
+    Game game;
+    moveHistory history;
+
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 4, new Queen(4, 4, true));
+    game.setBoard(b);
+    game.setTurn(true);
+
+    size_t sizeBefore  = history.moveHistoryVector.size();
+    int    stateBefore = history.currentBoardState;
+
+    IterDeep::search(game, history, 100, 1, 6);
+
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore)
+        << "moveHistoryVector leaked entries after IterDeep";
+    EXPECT_EQ(history.currentBoardState, stateBefore)
+        << "currentBoardState not restored after IterDeep";
+}
+
+TEST(IterDeepTest, TurnRestoredSimplePosition) {
+    Game game;
+    moveHistory history;
+
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 4, new Queen(4, 4, true));
+    game.setBoard(b);
+    game.setTurn(true);
+
+    bool turnBefore = game.isWhiteTurn();
+
+    IterDeep::search(game, history, 100, 1, 6);
+
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore)
+        << "whiteTurn flag not restored after IterDeep";
+}
+
+TEST(IterDeepTest, DeterministicSimplePosition) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 4, new Queen(4, 4, true));
+
+    Game g1, g2;
+    moveHistory h1, h2;
+    g1.setBoard(b); g1.setTurn(true);
+    g2.setBoard(b); g2.setTurn(true);
+
+    SearchResult r1 = IterDeep::search(g1, h1, 100, 1, 6);
+    SearchResult r2 = IterDeep::search(g2, h2, 100, 1, 6);
+
+    EXPECT_EQ(r1.score, r2.score)
+        << "IterDeep is non-deterministic on identical simple positions";
+}
