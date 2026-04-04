@@ -1,5 +1,3 @@
-[![CI](https://github.com/barlu3/lab-5-github-actions-jrodr675-lbari008/actions/workflows/main.yml/badge.svg)](https://github.com/barlu3/lab-5-github-actions-jrodr675-lbari008/actions/workflows/main.yml)
-
 # Chess Elo Estimator
 Author: Luke Baring https://github.com/barlu3
 
