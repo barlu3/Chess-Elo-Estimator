@@ -31,13 +31,15 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
 
     MoveOrder::orderMoves(moves, game.getBoard());
     for (const Move& move : moves) {
-        std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        Board snap = game.getBoard();
+        bool turn = game.isWhiteTurn();
         if (!game.performMove(move)) continue;
-        history.appendLatestMove(record);
+        history.appendSnapshot(snap, turn);
 
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
 
-        undoMove::undoLatestMove(history, game.getBoard(), game);
+        undoMove::undoLatestMove(history, game);
 
         if (score >= beta) return beta;     //opponent wont allow this move
         if (score > alpha) alpha = score;   //next best move for player
@@ -70,13 +72,15 @@ SearchResult AlphaBeta::search(Game& game, moveHistory& history, int depth) {
     long long beta = INF;
 
     for (auto move : moves) {
-        std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        Board snap = game.getBoard();
+        bool turn = game.isWhiteTurn();
         if (!game.performMove(move)) continue;
-        history.appendLatestMove(record);
+        history.appendSnapshot(snap, turn);
         
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
 
-        undoMove::undoLatestMove(history, game.getBoard(), game);
+        undoMove::undoLatestMove(history, game);
 
         if (score > result.score) {
             result.score = score;

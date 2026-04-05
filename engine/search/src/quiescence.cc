@@ -45,13 +45,15 @@ long long Quiescence::quiescence(Game& game, moveHistory& history, long long alp
     if (inCheck && moves.empty()) return -100000;
 
     for (auto move : moves) {
-        std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
+        Board snap = game.getBoard();
+        bool turn = game.isWhiteTurn();
         if (!game.performMove(move)) continue;
-        history.appendLatestMove(record);
+        history.appendSnapshot(snap, turn);
 
         long long score = -quiescence(game, history, -beta, -alpha, checkDepth - 1);
 
-        undoMove::undoLatestMove(history, game.getBoard(), game);
+        undoMove::undoLatestMove(history, game);
 
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;

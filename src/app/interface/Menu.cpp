@@ -170,24 +170,28 @@ void Menu::startBotGame(int difficulty) {
 
             if (move.fromRow == -3) {
                 if (moveHistory.moveHistoryVector.size() >= 2) {
-                    undoMove.undoLatestMove(moveHistory, game.getBoard(), game);
-                    undoMove.undoLatestMove(moveHistory, game.getBoard(), game);
+                    undoMove.undoLatestMove(moveHistory, game);
+                    undoMove.undoLatestMove(moveHistory, game);
                 }
                 else {
                     std::cout << "To early to undo move.\n";
                 }
             }
             else {
+                Board snap = game.getBoard();
+                bool turn = game.isWhiteTurn();
                 game.performMove(move);
-                moveHistory.appendLatestMove(converter.moveAsString(move, game.getBoard()));
+                moveHistory.appendSnapshot(snap, turn);
             }
         } else {
             std::cout << "Black (Stockfish) is thinking...\n";
             Move sfMove;
             if (Stockfish::getBestMove(game.getBoard(), game.isWhiteTurn(), difficulty, sfMove)) {
                 std::cout << "Stockfish plays: " << char('a'+sfMove.fromCol) << 8-sfMove.fromRow << char('a'+sfMove.toCol) << 8-sfMove.toRow << "\n";
+                Board sfSnap = game.getBoard();
+                bool sfTurn = game.isWhiteTurn();
                 game.performMove(sfMove);
-                moveHistory.appendLatestMove(converter.moveAsString(sfMove, game.getBoard()));
+                moveHistory.appendSnapshot(sfSnap, sfTurn);
             } else {
                 std::cerr << "Stockfish failed to make a move. Ending game.\n";
                 return;

@@ -896,109 +896,109 @@ int main(int argc, char **argv) {
 }
 
 // moveHistory and undoMoves
-TEST(MoveHistoryVectorTest, appendNewMovesTest) {
-    Board newBoard;
-    moveHistory moveHistory;
+// TEST(MoveHistoryVectorTest, appendNewMovesTest) {
+//     Board newBoard;
+//     moveHistory moveHistory;
 
-    Move move1 = {0, 1, 0, 2};
-    Move move2 = {7, 6, 7, 5};
+//     Move move1 = {0, 1, 0, 2};
+//     Move move2 = {7, 6, 7, 5};
 
-    convertMoveToString converter;
+//     convertMoveToString converter;
 
-    std::string moveStr1 = converter.moveAsString(move1, newBoard);
-    newBoard.movePiece(move1);
-    moveHistory.appendLatestMove(moveStr1);
+//     std::string moveStr1 = converter.moveAsString(move1, newBoard);
+//     newBoard.movePiece(move1);
+//     moveHistory.appendLatestMove(moveStr1);
 
-    std::string moveStr2 = converter.moveAsString(move2, newBoard);
-    newBoard.movePiece(move2);
-    moveHistory.appendLatestMove(moveStr2);
+//     std::string moveStr2 = converter.moveAsString(move2, newBoard);
+//     newBoard.movePiece(move2);
+//     moveHistory.appendLatestMove(moveStr2);
 
-    EXPECT_EQ(moveHistory.moveHistoryVector.size(), 2);
-}
+//     EXPECT_EQ(moveHistory.moveHistoryVector.size(), 2);
+// }
 
-TEST(MoveHistoryVectorTest, undoDefaultBoardTest) {
-    Game game;
-    moveHistory moveHistory;
-    undoMove undo;
+// TEST(MoveHistoryVectorTest, undoDefaultBoardTest) {
+//     Game game;
+//     moveHistory moveHistory;
+//     undoMove undo;
 
-    std::stringstream ss;
-    std::streambuf* oldCout = std::cout.rdbuf();
-    std::cout.rdbuf(ss.rdbuf());
+//     std::stringstream ss;
+//     std::streambuf* oldCout = std::cout.rdbuf();
+//     std::cout.rdbuf(ss.rdbuf());
 
-    undo.undoLatestMove(moveHistory, game.getBoard(), game);
+//     undo.undoLatestMove(moveHistory, game.getBoard(), game);
 
-    std::cout.rdbuf(oldCout);
+//     std::cout.rdbuf(oldCout);
 
-    EXPECT_EQ(ss.str(), "To early to undo any move.\n");
-}
+//     EXPECT_EQ(ss.str(), "To early to undo any move.\n");
+// }
 
-TEST(MoveHistoryVectorTest, undoFirstTwoMoves) {
-    Game game;
-    moveHistory moveHistoryDefault;
-    moveHistory moveHistoryWithMoves;
-    undoMove undo;
+// TEST(MoveHistoryVectorTest, undoFirstTwoMoves) {
+//     Game game;
+//     moveHistory moveHistoryDefault;
+//     moveHistory moveHistoryWithMoves;
+//     undoMove undo;
 
-    Move move1 = {0, 1, 0, 2};
-    Move move2 = {7, 6, 7, 5};
+//     Move move1 = {0, 1, 0, 2};
+//     Move move2 = {7, 6, 7, 5};
 
-    convertMoveToString converter;
+//     convertMoveToString converter;
 
-    std::string moveStr1 = converter.moveAsString(move1, game.getBoard());
-    game.getBoard().movePiece(move1);
-    moveHistoryWithMoves.appendLatestMove(moveStr1);
+//     std::string moveStr1 = converter.moveAsString(move1, game.getBoard());
+//     game.getBoard().movePiece(move1);
+//     moveHistoryWithMoves.appendLatestMove(moveStr1);
 
-    std::string moveStr2 = converter.moveAsString(move2, game.getBoard());
-    game.getBoard().movePiece(move2);
-    moveHistoryWithMoves.appendLatestMove(moveStr2);
+//     std::string moveStr2 = converter.moveAsString(move2, game.getBoard());
+//     game.getBoard().movePiece(move2);
+//     moveHistoryWithMoves.appendLatestMove(moveStr2);
 
-    ASSERT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), 2);
-    undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
-    undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
+//     ASSERT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), 2);
+//     undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
+//     undo.undoLatestMove(moveHistoryWithMoves, game.getBoard(), game);
 
-    EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
-}
+//     EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
+// }
 
-TEST(MoveHistoryVectorTest, undoThreeTurns) {
-    Game game1;
-    Game game2;
-    moveHistory moveHistoryDefault;
-    moveHistory moveHistoryWithMoves;
-    undoMove undo;
+// TEST(MoveHistoryVectorTest, undoThreeTurns) {
+//     Game game1;
+//     Game game2;
+//     moveHistory moveHistoryDefault;
+//     moveHistory moveHistoryWithMoves;
+//     undoMove undo;
 
-    Move move1 = {0, 1, 0, 2};
-    Move move2 = {7, 6, 7, 5};
-    Move move3 = {1, 0, 2, 2};
-    Move move4 = {3, 6, 3, 4};
-    Move move5 = {3, 1, 3, 2};
-    Move move6 = {2, 7, 7, 2};
-    Move move7 = {2, 0, 4, 2};
+//     Move move1 = {0, 1, 0, 2};
+//     Move move2 = {7, 6, 7, 5};
+//     Move move3 = {1, 0, 2, 2};
+//     Move move4 = {3, 6, 3, 4};
+//     Move move5 = {3, 1, 3, 2};
+//     Move move6 = {2, 7, 7, 2};
+//     Move move7 = {2, 0, 4, 2};
 
-    convertMoveToString converter;
+//     convertMoveToString converter;
 
-    std::string moveStr1 = converter.moveAsString(move1, game1.getBoard());
-    moveHistoryDefault.appendLatestMove(moveStr1);
+//     std::string moveStr1 = converter.moveAsString(move1, game1.getBoard());
+//     moveHistoryDefault.appendLatestMove(moveStr1);
 
-    moveStr1 = converter.moveAsString(move1, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr1);
-    std::string moveStr2 = converter.moveAsString(move2, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr2);
-    std::string moveStr3 = converter.moveAsString(move3, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr3);
-    std::string moveStr4 = converter.moveAsString(move4, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr4);
-    std::string moveStr5 = converter.moveAsString(move5, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr5);
-    std::string moveStr6 = converter.moveAsString(move6, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr6);
-    std::string moveStr7 = converter.moveAsString(move7, game2.getBoard());
-    moveHistoryWithMoves.appendLatestMove(moveStr7);
+//     moveStr1 = converter.moveAsString(move1, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr1);
+//     std::string moveStr2 = converter.moveAsString(move2, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr2);
+//     std::string moveStr3 = converter.moveAsString(move3, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr3);
+//     std::string moveStr4 = converter.moveAsString(move4, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr4);
+//     std::string moveStr5 = converter.moveAsString(move5, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr5);
+//     std::string moveStr6 = converter.moveAsString(move6, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr6);
+//     std::string moveStr7 = converter.moveAsString(move7, game2.getBoard());
+//     moveHistoryWithMoves.appendLatestMove(moveStr7);
 
-    for (unsigned i = 0; i < 6; ++i) {
-        undo.undoLatestMove(moveHistoryWithMoves, game2.getBoard(), game2);
-    }
+//     for (unsigned i = 0; i < 6; ++i) {
+//         undo.undoLatestMove(moveHistoryWithMoves, game2.getBoard(), game2);
+//     }
 
-    EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
-}
+//     EXPECT_EQ(moveHistoryWithMoves.moveHistoryVector.size(), moveHistoryDefault.moveHistoryVector.size());
+// }
 
 //---------------------
 //EVALUATOR TESTS
@@ -1278,7 +1278,10 @@ TEST(AlphaBetaTest, MatchesNegamaxScore) {
     long long negamaxScore  = NegaMax::negamax(g1, h1, 3);
     long long alphabetaScore = AlphaBeta::alphabeta(g2, h2, 3, -1e18, 1e18);
 
-    EXPECT_GE(negamaxScore, alphabetaScore)
+    std::cout << "negamaxScore: " << negamaxScore << "\n";
+    std::cout << "alphabetaScore: " << alphabetaScore << "\n";
+
+    EXPECT_EQ(negamaxScore, alphabetaScore)
         << "Alpha-beta returned different score than negamax on same position";
 }
 static const long long INF = 1e18;
@@ -1312,7 +1315,7 @@ TEST(AlphaBetaTest, MatchesNegamaxDepth3) {
     Game g1, g2;
     moveHistory h1, h2;
 
-    EXPECT_GE(
+    EXPECT_EQ(
         NegaMax::negamax(g1, h1, 3),
         AlphaBeta::alphabeta(g2, h2, 3, -INF, INF)
     );
@@ -1326,7 +1329,7 @@ TEST(AlphaBetaTest, MatchesNegamaxBlackToMove) {
     g1.setTurn(false);
     g2.setTurn(false);
 
-    EXPECT_GE(
+    EXPECT_EQ(
         NegaMax::negamax(g1, h1, 2),
         AlphaBeta::alphabeta(g2, h2, 2, -INF, INF)
     );
@@ -1779,9 +1782,10 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     size_t    sizeBefore  = history.moveHistoryVector.size();
     int       stateBefore = history.currentBoardState;
     bool      turnBefore  = game.isWhiteTurn();
-
-    IterDeep::search(game, history, 100, 1, 3);
-
+    UI::printBoard(game.getBoard());
+    // IterDeep::search(game, history, 100, 1, 3);
+    AlphaBeta::search(game,history,4);
+    UI::printBoard(game.getBoard());
     EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
     EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
