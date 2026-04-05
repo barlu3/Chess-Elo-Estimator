@@ -69,6 +69,12 @@ class undoMove {
                 board.setPieceRaw(rec.rookToRow,   rec.rookToCol,   nullptr);
             }
 
+            if (rec.enPassantClearedRow != -1) {
+                Piece* p = const_cast<Piece*>(
+                    board.getPiece(rec.enPassantClearedRow, rec.enPassantClearedCol));
+                if (p) p->setEnPassant(true);
+            }
+
             history.pop();
         }
 };

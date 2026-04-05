@@ -7,16 +7,6 @@
 #include <string>
 #include <vector>
 
-// class moveHistory {
-//     public:
-//         int currentBoardState;
-//         std::vector<std::string> moveHistoryVector;
-
-//         void appendLatestMove(std::string move);
-//         moveHistory();
-// };
-
-//temp class to see if this fixes undomove leakage
 struct MoveRecord {
     Move move;
 
@@ -32,6 +22,8 @@ struct MoveRecord {
 
     bool enPassantCapture;
     int epCapturedRow, epCapturedCol;
+    int enPassantClearedRow = -1;
+    int enPassantClearedCol = -1;
     Piece* epCapturedPiece;
 
     bool wasPromotion;

@@ -53,9 +53,32 @@ bool MoveExecutor::make(const Move& move, Game& game, MoveHistory& history) {
     if (rec.wasPromotion) {
         rec.promotedFromPiece = fromPos->clone();
     }
+
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            const Piece* p = board.getPiece(r, c);
+            if (!p) continue;
+            if (p->getColor() != game.isWhiteTurn()) continue;
+            if (p == fromPos) continue;  // the moving piece is handled separately
+            if (p->enPassantable()) {
+                rec.enPassantClearedRow = r;
+                rec.enPassantClearedCol = c;
+                break;
+            }
+        }
+        if (rec.enPassantClearedRow != -1) break;
+    }
+    
+    if (rec.enPassantClearedRow != -1) {
+        Piece* p = const_cast<Piece*>(
+            game.getBoard().getPiece(rec.enPassantClearedRow, rec.enPassantClearedCol));
+        if (p) p->setEnPassant(false);
+    }
+
     if (!game.performMove(move)) {
         delete rec.capturedPiece;
         delete rec.epCapturedPiece;
+        delete rec.promotedFromPiece;
         return false;
     }
 
