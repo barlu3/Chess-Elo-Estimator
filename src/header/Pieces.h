@@ -43,6 +43,7 @@ class Piece {
         //for checking if moved (pawn, rook, king)
         virtual bool hasMoved() const { return false; }
         virtual void setMoved() {}
+        virtual void unsetMoved() {}
 
         // //for checking if pawns can be en Passant'ed
         virtual bool enPassantable() const { return false; }

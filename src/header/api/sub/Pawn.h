@@ -20,6 +20,8 @@ class Pawn : public Piece {
         void setEnPassant(bool set) override {enPassantBool = set;};
         bool hasMoved() const override {return moved;};
         void setMoved() override {moved = true;}
+        void unsetMoved() override { moved = false; }
+
 };
 
 #endif

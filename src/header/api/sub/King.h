@@ -15,6 +15,7 @@ class King : public Piece {
 
         void setMoved() override { moved = true; }
         bool hasMoved() const override { return moved; }
+        void unsetMoved() override { moved = false; }
 };
 
 #endif

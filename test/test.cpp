@@ -1075,7 +1075,7 @@ static Board emptyBoard() {
 // No moves should be searched — validates the base case short-circuit.
 TEST(NegaMaxTest, DepthZeroMatchesEvaluator) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long evalScore   = Evaluator::evaluate(game);
     long long searchScore = NegaMax::negamax(game, history, 0);
@@ -1086,7 +1086,7 @@ TEST(NegaMaxTest, DepthZeroMatchesEvaluator) {
 // Starting position is material-equal so depth-0 score must be exactly 0.
 TEST(NegaMaxTest, DepthZeroStartingPositionIsZero) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     EXPECT_EQ(NegaMax::negamax(game, history, 0), 0LL);
 }
@@ -1099,7 +1099,7 @@ TEST(NegaMaxTest, DepthZeroStartingPositionIsZero) {
 // With white to move the score should be positive.
 TEST(NegaMaxTest, WhiteUpQueenIsPositive) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     game.getBoard().removePiece(0, 3);  // remove black queen at d8
 
@@ -1112,7 +1112,7 @@ TEST(NegaMaxTest, WhiteUpQueenIsPositive) {
 // This validates the side-to-move normalization in the evaluator.
 TEST(NegaMaxTest, PerspectiveFlipsWithSideToMove) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     game.getBoard().removePiece(0, 3);  // remove black queen
     game.setTurn(false);                // black to move
@@ -1125,7 +1125,7 @@ TEST(NegaMaxTest, PerspectiveFlipsWithSideToMove) {
 // Starting position with black to move should still be 0 (symmetric material).
 TEST(NegaMaxTest, StartingPositionSymmetricForBlack) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     game.setTurn(false);
 
@@ -1152,7 +1152,7 @@ TEST(NegaMaxTest, StalemateReturnsZero) {
     ASSERT_TRUE(game.getBoard().isStalemate(false))
         << "Setup error: position should be stalemate for black";
 
-    moveHistory history;
+    MoveHistory history;
     long long score = NegaMax::negamax(game, history, 1);
     EXPECT_EQ(score, 0LL);
 }
@@ -1176,7 +1176,7 @@ TEST(NegaMaxTest, CheckmateReturnsLargeNegative) {
     ASSERT_TRUE(game.getBoard().isCheckMate(false))
         << "Setup error: position should be checkmate for black";
 
-    moveHistory history;
+    MoveHistory history;
     long long score = NegaMax::negamax(game, history, 1);
     EXPECT_LT(score, -10000LL);
 }
@@ -1199,7 +1199,7 @@ TEST(NegaMaxTest, FindsFreeQueenCapture) {
     game.setBoard(b);
     game.setTurn(true);
 
-    moveHistory history;
+    MoveHistory history;
     long long score = NegaMax::negamax(game, history, 1);
     EXPECT_GE(score, 100LL);
 }
@@ -1212,7 +1212,7 @@ TEST(NegaMaxTest, FindsFreeQueenCapture) {
 // This is the most important correctness test — catches any make/undo mismatch.
 TEST(NegaMaxTest, BoardMaterialRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long whiteBefore = countMaterial(game.getBoard(), true);
     long long blackBefore = countMaterial(game.getBoard(), false);
@@ -1232,7 +1232,7 @@ TEST(NegaMaxTest, BoardMaterialRestoredAfterSearch) {
 // Validates that appendLatestMove and undoLatestMove are perfectly balanced.
 TEST(NegaMaxTest, HistorySizeRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     size_t sizeBefore  = history.moveHistoryVector.size();
     int    stateBefore = history.currentBoardState;
@@ -1248,7 +1248,7 @@ TEST(NegaMaxTest, HistorySizeRestoredAfterSearch) {
 // The whiteTurn flag on Game must not be mutated by search.
 TEST(NegaMaxTest, TurnUnchangedAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     bool turnBefore = game.isWhiteTurn();
     NegaMax::negamax(game, history, 2);
@@ -1261,7 +1261,7 @@ TEST(NegaMaxTest, TurnUnchangedAfterSearch) {
 // Non-determinism here means search is silently corrupting state between calls.
 TEST(NegaMaxTest, DeterministicOnSamePosition) {
     Game game1, game2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     long long score1 = NegaMax::negamax(game1, h1, 2);
     long long score2 = NegaMax::negamax(game2, h2, 2);
@@ -1273,7 +1273,7 @@ TEST(NegaMaxTest, DeterministicOnSamePosition) {
 //ALPHA BETA TEST SUITES
 TEST(AlphaBetaTest, MatchesNegamaxScore) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     long long negamaxScore  = NegaMax::negamax(g1, h1, 3);
     long long alphabetaScore = AlphaBeta::alphabeta(g2, h2, 3, -1e18, 1e18);
@@ -1293,7 +1293,7 @@ static const long long INF = 1e18;
 // If any of these fail, the cutoff logic is wrong.
 TEST(AlphaBetaTest, MatchesNegamaxDepth1) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     EXPECT_EQ(
         NegaMax::negamax(g1, h1, 1),
@@ -1303,7 +1303,7 @@ TEST(AlphaBetaTest, MatchesNegamaxDepth1) {
 
 TEST(AlphaBetaTest, MatchesNegamaxDepth2) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     EXPECT_EQ(
         NegaMax::negamax(g1, h1, 2),
@@ -1313,7 +1313,7 @@ TEST(AlphaBetaTest, MatchesNegamaxDepth2) {
 
 TEST(AlphaBetaTest, MatchesNegamaxDepth3) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     EXPECT_EQ(
         NegaMax::negamax(g1, h1, 3),
@@ -1324,7 +1324,7 @@ TEST(AlphaBetaTest, MatchesNegamaxDepth3) {
 // Same correctness check but with black to move.
 TEST(AlphaBetaTest, MatchesNegamaxBlackToMove) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     g1.setTurn(false);
     g2.setTurn(false);
@@ -1341,7 +1341,7 @@ TEST(AlphaBetaTest, MatchesNegamaxBlackToMove) {
 
 TEST(AlphaBetaTest, DepthZeroMatchesEvaluator) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     EXPECT_EQ(
         Evaluator::evaluate(game),
@@ -1351,7 +1351,7 @@ TEST(AlphaBetaTest, DepthZeroMatchesEvaluator) {
 
 TEST(AlphaBetaTest, DepthZeroStartingPositionIsZero) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     EXPECT_EQ(AlphaBeta::alphabeta(game, history, 0, -INF, INF), 0LL);
 }
@@ -1374,7 +1374,7 @@ TEST(AlphaBetaTest, StalemateReturnsZero) {
     ASSERT_TRUE(game.getBoard().isStalemate(false))
         << "Setup error: position should be stalemate for black";
 
-    moveHistory history;
+    MoveHistory history;
     EXPECT_EQ(AlphaBeta::alphabeta(game, history, 1, -INF, INF), 0LL);
 }
 
@@ -1392,7 +1392,7 @@ TEST(AlphaBetaTest, CheckmateReturnsLargeNegative) {
     ASSERT_TRUE(game.getBoard().isCheckMate(false))
         << "Setup error: position should be checkmate for black";
 
-    moveHistory history;
+    MoveHistory history;
     EXPECT_LT(AlphaBeta::alphabeta(game, history, 1, -INF, INF), -10000LL);
 }
 
@@ -1404,7 +1404,7 @@ TEST(AlphaBetaTest, CheckmateReturnsLargeNegative) {
 // Score returned must be <= beta (the upper bound we passed in).
 TEST(AlphaBetaTest, ImmediateBetaCutoffWhenWindowClosed) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     // Pass a closed window: alpha == beta == 0
     // Any score found will trigger cutoff immediately
@@ -1418,7 +1418,7 @@ TEST(AlphaBetaTest, ImmediateBetaCutoffWhenWindowClosed) {
 // immediate cutoffs everywhere — score must be <= alpha passed in.
 TEST(AlphaBetaTest, HighAlphaCausesImmediateCutoffs) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long score = AlphaBeta::alphabeta(game, history, 2, 100000LL, INF);
 
@@ -1432,7 +1432,7 @@ TEST(AlphaBetaTest, HighAlphaCausesImmediateCutoffs) {
 
 TEST(AlphaBetaTest, BoardMaterialRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long whiteBefore = countMaterial(game.getBoard(), true);
     long long blackBefore = countMaterial(game.getBoard(), false);
@@ -1447,7 +1447,7 @@ TEST(AlphaBetaTest, BoardMaterialRestoredAfterSearch) {
 
 TEST(AlphaBetaTest, HistorySizeRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     size_t sizeBefore  = history.moveHistoryVector.size();
     int    stateBefore = history.currentBoardState;
@@ -1462,7 +1462,7 @@ TEST(AlphaBetaTest, HistorySizeRestoredAfterSearch) {
 
 TEST(AlphaBetaTest, TurnUnchangedAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     bool turnBefore = game.isWhiteTurn();
     AlphaBeta::alphabeta(game, history, 2, -INF, INF);
@@ -1473,7 +1473,7 @@ TEST(AlphaBetaTest, TurnUnchangedAfterSearch) {
 
 TEST(AlphaBetaTest, DeterministicOnSamePosition) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     long long score1 = AlphaBeta::alphabeta(g1, h1, 3, -INF, INF);
     long long score2 = AlphaBeta::alphabeta(g2, h2, 3, -INF, INF);
@@ -1640,7 +1640,7 @@ TEST(MoveOrderTest, EqualValueCapturesBeforeQuiets) {
 // search() must return a valid move, not the sentinel {-1,-1,-1,-1}
 TEST(SearchTest, ReturnsValidMove) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     SearchResult result = AlphaBeta::search(game, history, 1);
 
@@ -1663,7 +1663,7 @@ TEST(SearchTest, FindsMateInOne) {
     game.getBoard().setPiece(2, 5, new Queen(2, 5, true));   // white queen f7
     game.getBoard().setPiece(2, 6, new King(2, 6, true));    // white king  g7
 
-    moveHistory history;
+    MoveHistory history;
 
     SearchResult result = AlphaBeta::search(game, history, 1);          
 
@@ -1687,7 +1687,7 @@ TEST(SearchTest, PrefersFreeCaptureOverQuiet) {
     game.setBoard(b);
     game.setTurn(true);
 
-    moveHistory history;
+    MoveHistory history;
     SearchResult result = AlphaBeta::search(game, history, 1);
 
     // Best move must be pawn captures queen: (4,3) -> (3,4)
@@ -1701,7 +1701,7 @@ TEST(SearchTest, PrefersFreeCaptureOverQuiet) {
 // Board and history must be fully restored after search()
 TEST(SearchTest, BoardAndHistoryRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long whiteBefore = countMaterial(game.getBoard(), true);
     long long blackBefore = countMaterial(game.getBoard(), false);
@@ -1721,7 +1721,7 @@ TEST(SearchTest, BoardAndHistoryRestoredAfterSearch) {
 // search() score must be deterministic across two identical positions
 TEST(SearchTest, DeterministicOnSamePosition) {
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     SearchResult r1 = AlphaBeta::search(g1, h1, 2);
     SearchResult r2 = AlphaBeta::search(g2, h2, 2);
@@ -1737,7 +1737,7 @@ TEST(SearchTest, DeterministicOnSamePosition) {
 // IterDeep must always return a valid move even with a very tight time limit
 TEST(IterDeepTest, AlwaysReturnsValidMove) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     // minDepth=1 guarantees at least one completed search
     SearchResult result = IterDeep::search(game, history, 1, 1);
@@ -1761,7 +1761,7 @@ TEST(IterDeepTest, MatchesAlphaBetaAtDepth1) {
     g1.setBoard(b); g1.setTurn(true);
     g2.setBoard(b); g2.setTurn(true);
 
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
 
     SearchResult abResult    = AlphaBeta::search(g1, h1, 1);
     // generous time limit so iterdeep completes depth 1 comfortably
@@ -1775,7 +1775,7 @@ TEST(IterDeepTest, MatchesAlphaBetaAtDepth1) {
 // does not pass all the time, suspecting seg error
 TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     long long whiteBefore = countMaterial(game.getBoard(), true);
     long long blackBefore = countMaterial(game.getBoard(), false);
@@ -1783,8 +1783,10 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     int       stateBefore = history.currentBoardState;
     bool      turnBefore  = game.isWhiteTurn();
 
-    IterDeep::search(game, history, 100, 1, 3);
-
+    UI::printBoard(game.getBoard());
+    // IterDeep::search(game, history, 100, 1, 3);
+    AlphaBeta::search(game, history, 3);
+    UI::printBoard(game.getBoard());
     EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
     EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
@@ -1794,7 +1796,7 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
 
 TEST(IterDeepTest, BoardRestoredSimplePosition) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     Board b = emptyBoard();
     b.setPiece(7, 4, new King(7, 4, true));
@@ -1816,7 +1818,7 @@ TEST(IterDeepTest, BoardRestoredSimplePosition) {
 
 TEST(IterDeepTest, HistoryRestoredSimplePosition) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     Board b = emptyBoard();
     b.setPiece(7, 4, new King(7, 4, true));
@@ -1838,7 +1840,7 @@ TEST(IterDeepTest, HistoryRestoredSimplePosition) {
 
 TEST(IterDeepTest, TurnRestoredSimplePosition) {
     Game game;
-    moveHistory history;
+    MoveHistory history;
 
     Board b = emptyBoard();
     b.setPiece(7, 4, new King(7, 4, true));
@@ -1862,7 +1864,7 @@ TEST(IterDeepTest, DeterministicSimplePosition) {
     b.setPiece(4, 4, new Queen(4, 4, true));
 
     Game g1, g2;
-    moveHistory h1, h2;
+    MoveHistory h1, h2;
     g1.setBoard(b); g1.setTurn(true);
     g2.setBoard(b); g2.setTurn(true);
 

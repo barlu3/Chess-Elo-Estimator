@@ -9,6 +9,7 @@
 #include "api/moveHistory.h"
 #include "api/undoMove.h"
 #include "api/convertMoveToString.h"
+#include "search/MoveExecutor.h"
 
 #include <iostream>
 
@@ -142,7 +143,7 @@ void Menu::startBotGame(int difficulty) {
     std::cout << "\nStarting game vs Bot (Difficulty " << difficulty << ")...\n";
 
     Game game;
-    moveHistory moveHistory;
+    MoveHistory moveHistory;
     convertMoveToString converter;
     undoMove undoMove;
 
@@ -170,28 +171,21 @@ void Menu::startBotGame(int difficulty) {
 
             if (move.fromRow == -3) {
                 if (moveHistory.moveHistoryVector.size() >= 2) {
-                    undoMove.undoLatestMove(moveHistory, game);
-                    undoMove.undoLatestMove(moveHistory, game);
+                    MoveExecutor::undo(game, moveHistory);
                 }
                 else {
                     std::cout << "To early to undo move.\n";
                 }
             }
             else {
-                Board snap = game.getBoard();
-                bool turn = game.isWhiteTurn();
-                game.performMove(move);
-                moveHistory.appendSnapshot(snap, turn);
+                MoveExecutor::make(move, game, moveHistory);
             }
         } else {
             std::cout << "Black (Stockfish) is thinking...\n";
             Move sfMove;
             if (Stockfish::getBestMove(game.getBoard(), game.isWhiteTurn(), difficulty, sfMove)) {
                 std::cout << "Stockfish plays: " << char('a'+sfMove.fromCol) << 8-sfMove.fromRow << char('a'+sfMove.toCol) << 8-sfMove.toRow << "\n";
-                Board sfSnap = game.getBoard();
-                bool sfTurn = game.isWhiteTurn();
-                game.performMove(sfMove);
-                moveHistory.appendSnapshot(sfSnap, sfTurn);
+                MoveExecutor::make(sfMove, game, moveHistory);
             } else {
                 std::cerr << "Stockfish failed to make a move. Ending game.\n";
                 return;

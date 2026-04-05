@@ -12,9 +12,9 @@ struct SearchResult {
 
 class AlphaBeta {
     public:
-        static long long alphabeta(Game& game, moveHistory& history, int depth, long long alpha, long long beta);
+        static long long alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta);
 
-        static SearchResult search(Game& game, moveHistory& history, int depth);
+        static SearchResult search(Game& game, MoveHistory& history, int depth);
 };
 
 

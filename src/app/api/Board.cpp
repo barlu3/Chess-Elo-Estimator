@@ -112,6 +112,10 @@ void Board::setPiece(int row, int column, Piece* piece) {
     removePiece(row,column);
     board[row][column] = piece;
 }
+// !!VOLATILE!! make sure you are using this properly
+void Board::setPieceRaw(int row, int column, Piece* piece) {
+    board[row][column] = piece;
+}
 void Board::movePiece(const Move& move) {
     Piece* piece = board[move.fromRow][move.fromCol];
     //detect castling, is this piece a king

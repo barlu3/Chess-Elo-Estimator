@@ -5,26 +5,18 @@
 #include "api/undoMove.h"
 #include "api/convertMoveToString.h"
 
+#include "search/MoveExecutor.h"
+
 #include "search/header/negamax.h"
 #include "eval/material.h"
 #include "search/header/ordering.h"
 
 #include <vector>
 
-long long NegaMax::negamax(Game& game, moveHistory& history, int depth) {
+long long NegaMax::negamax(Game& game, MoveHistory& history, int depth) {
     if (depth == 0) return Evaluator::evaluate(game);
 
-    std::vector<Move> moves;
-    for (int r = 0; r < 8; r++) {
-        for (int c = 0; c < 8; c++) {
-            if (!game.getBoard().isEmpty(r,c)) {
-                const Piece* piece = game.getBoard().getPiece(r,c);
-                if (piece->getColor() != game.isWhiteTurn()) continue;
-                auto pieceMoves = piece->generateMoves(game.getBoard(), false);
-                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
-            }
-        }
-    }
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
     if (moves.empty()) {
         return game.getBoard().isInCheck(game.isWhiteTurn()) ? -100000 : 0;
@@ -35,15 +27,11 @@ long long NegaMax::negamax(Game& game, moveHistory& history, int depth) {
     long long best = -1e18;
     for (auto move : moves) {
         // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
-        Board snap = game.getBoard();
-        bool turn = game.isWhiteTurn();
-        if (!game.performMove(move)) continue;                                                                 //pseudo perform the move
-        history.appendSnapshot(snap, turn);     //append latest move to move history
+        if (!MoveExecutor::make(move, game, history)) continue;                                                                 //pseudo perform the move append latest move to move history
 
-        long long score = -negamax(game, history, depth - 1);                                   //recursively calculate the best move
+        best = std::max(best,-negamax(game, history, depth - 1));                                                            //set best score recursively calculate the best move
         
-        undoMove::undoLatestMove(history, game);                                     //undo all the pseudo moves
-        best = std::max(best,score);                                                            //set best score
+        MoveExecutor::undo(game,history);                                     //undo all the pseudo moves
     }
     return best;
 }

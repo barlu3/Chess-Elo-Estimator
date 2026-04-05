@@ -5,41 +5,28 @@
 #include "api/undoMove.h"
 #include "api/convertMoveToString.h"
 
+#include "search/MoveExecutor.h"
+
 #include "search/header/alphabeta.h"
 #include "search/header/quiescence.h"
 #include "search/header/ordering.h"
 
 #include <vector>
 
-long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long long alpha, long long beta) {
+long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
     if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta, 1);
 
-    std::vector<Move> moves;
-
-    for (int r = 0 ; r < 8; r++) {
-        for (int c = 0 ; c < 8 ; c++) {
-            if (!game.getBoard().isEmpty(r,c)) {
-                const Piece* piece = game.getBoard().getPiece(r,c);
-                if(piece->getColor() != game.isWhiteTurn()) continue;
-                auto pieceMoves = piece->generateMoves(game.getBoard(), false);
-                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
-            }
-        }
-    }
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
     if (moves.empty()) return game.getBoard().isInCheck(game.isWhiteTurn()) ? -100000 : 0;
 
     MoveOrder::orderMoves(moves, game.getBoard());
+    
     for (const Move& move : moves) {
         // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
-        Board snap = game.getBoard();
-        bool turn = game.isWhiteTurn();
-        if (!game.performMove(move)) continue;
-        history.appendSnapshot(snap, turn);
-
+        if (!MoveExecutor::make(move, game, history)) continue;
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
-
-        undoMove::undoLatestMove(history, game);
+        MoveExecutor::undo(game,history);
 
         if (score >= beta) return beta;     //opponent wont allow this move
         if (score > alpha) alpha = score;   //next best move for player
@@ -47,20 +34,10 @@ long long AlphaBeta::alphabeta(Game& game, moveHistory& history, int depth, long
     return alpha;
 }
 
-SearchResult AlphaBeta::search(Game& game, moveHistory& history, int depth) {
+SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth) {
     static const long long INF = 1e18;
 
-    std::vector<Move> moves;
-    for (int r = 0; r < 8; r++) {
-        for (int c = 0; c < 8; c++) {
-            if (!game.getBoard().isEmpty(r,c)) {
-                const Piece* piece = game.getBoard().getPiece(r,c);
-                if (piece->getColor() != game.isWhiteTurn()) continue;
-                auto pieceMoves = piece->generateMoves(game.getBoard(), false);
-                moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
-            }
-        }
-    }
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
     MoveOrder::orderMoves(moves, game.getBoard());
 
@@ -73,14 +50,11 @@ SearchResult AlphaBeta::search(Game& game, moveHistory& history, int depth) {
 
     for (auto move : moves) {
         // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
-        Board snap = game.getBoard();
-        bool turn = game.isWhiteTurn();
-        if (!game.performMove(move)) continue;
-        history.appendSnapshot(snap, turn);
+        if (!MoveExecutor::make(move, game, history)) continue;
         
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
 
-        undoMove::undoLatestMove(history, game);
+        MoveExecutor::undo(game, history);
 
         if (score > result.score) {
             result.score = score;

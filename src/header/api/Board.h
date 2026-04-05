@@ -18,6 +18,7 @@ class Board {
         const std::vector<Piece*> Pieces() const;
         const Piece* getPiece(int row, int column) const;
         void setPiece(int row, int column, Piece* piece);
+        void setPieceRaw(int row, int column, Piece* piece);
         void movePiece(const Move& move);
         void removePiece(int row, int column);
 

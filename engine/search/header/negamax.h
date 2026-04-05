@@ -6,7 +6,7 @@
 
 class NegaMax {
     public:
-        static long long negamax(Game& game, moveHistory& history, int depth);
+        static long long negamax(Game& game, MoveHistory& history, int depth);
 };
 
 #endif

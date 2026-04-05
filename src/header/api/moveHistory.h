@@ -1,10 +1,11 @@
 #ifndef MOVEHISTORY_H
 #define MOVEHISTORY_H
 
+#include "Board.h"
+#include "Pieces.h"
+
 #include <string>
 #include <vector>
-
-#include "Board.h"
 
 // class moveHistory {
 //     public:
@@ -16,30 +17,61 @@
 // };
 
 //temp class to see if this fixes undomove leakage
-struct BoardSnapshot {
-    Board board;
-    bool whiteTurn;
+struct MoveRecord {
+    Move move;
+
+    Piece* capturedPiece;
+
+    bool movedFlagBefore;
+    bool enPassantBefore;
+
+    bool rookMoved;
+    int rookFromRow, rookFromCol;
+    int rookToRow, rookToCol;
+    bool rookMovedFlagBefore;
+
+    bool enPassantCapture;
+    int epCapturedRow, epCapturedCol;
+    Piece* epCapturedPiece;
+
+    bool wasPromotion;
+    Piece* promotedFromPiece;
+
+    bool whiteTurnBefore;
 };
 
-class moveHistory {
+class MoveHistory {
     public:
         int currentBoardState = 0;
-        std::vector<BoardSnapshot> moveHistoryVector;
+        std::vector<MoveRecord> moveHistoryVector;
 
-        void appendSnapshot(const Board& board, bool whiteTurn) {
-            moveHistoryVector.push_back({board, whiteTurn});
+        void push(MoveRecord rec) {
+            moveHistoryVector.push_back(std::move(rec));
             currentBoardState++;
         }
 
-        void popSnapshot() {
+        MoveRecord& top() {
+            return moveHistoryVector.back();
+        }
+
+        void pop() {
             if (!moveHistoryVector.empty()) {
+                delete moveHistoryVector.back().capturedPiece;
+                delete moveHistoryVector.back().epCapturedPiece;
+                delete moveHistoryVector.back().promotedFromPiece;
+
                 moveHistoryVector.pop_back();
                 currentBoardState--;
             }
         }
 
-        moveHistory()=default;
+        MoveHistory()=default;
+        ~MoveHistory() {
+            while (!moveHistoryVector.empty()) pop();
+        }
 
+        MoveHistory(const MoveHistory&)     =delete;
+        MoveHistory& operator=(const MoveHistory&) =delete;
 };
 
 #endif

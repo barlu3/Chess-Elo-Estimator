@@ -12,16 +12,64 @@
 //temp class to see if fixes undoMove leakage
 class undoMove {
     public:
-        static void undoLatestMove(moveHistory& history, Game& game) {
+        static void undoLatestMove(MoveHistory& history, Game& game) {
             if (history.currentBoardState < 1) {
                 std::cout << "Too early to undo any move.\n";
                 return;
             }
 
-            const BoardSnapshot& snap = history.moveHistoryVector.back();
-            game.setBoard(snap.board);
-            game.setTurn(snap.whiteTurn);
-            history.popSnapshot();
+            MoveRecord& rec = history.top();
+            Board& board = game.getBoard();
+
+            game.setTurn(rec.whiteTurnBefore);
+
+            // Promotion: queen at dest is not the original piece — handle separately
+            if (rec.wasPromotion) {
+                board.removePiece(rec.move.toRow, rec.move.toCol);  // delete queen
+                rec.promotedFromPiece->setPosition(rec.move.fromRow, rec.move.fromCol);
+                board.setPieceRaw(rec.move.fromRow, rec.move.fromCol, rec.promotedFromPiece);
+                rec.promotedFromPiece = nullptr;
+
+                // Restore any piece that was on the promotion square
+                if (rec.capturedPiece) {
+                    board.setPieceRaw(rec.move.toRow, rec.move.toCol, rec.capturedPiece);
+                    rec.capturedPiece = nullptr;
+                }
+
+                history.pop();
+                return;
+            }
+
+            // Normal move: move piece back
+            Piece* mp = const_cast<Piece*>(board.getPiece(rec.move.toRow, rec.move.toCol));
+            mp->setPosition(rec.move.fromRow, rec.move.fromCol);
+            if (!rec.movedFlagBefore) mp->unsetMoved();
+            mp->setEnPassant(rec.enPassantBefore);
+            board.setPieceRaw(rec.move.fromRow, rec.move.fromCol, mp);
+            board.setPieceRaw(rec.move.toRow,   rec.move.toCol,   nullptr);
+
+            // Restore captured piece — transfer ownership, don't clone
+            if (rec.capturedPiece && !rec.enPassantCapture) {
+                board.setPieceRaw(rec.move.toRow, rec.move.toCol, rec.capturedPiece);
+                rec.capturedPiece = nullptr;
+            }
+
+            // Restore en passant captured pawn — transfer ownership
+            if (rec.enPassantCapture && rec.epCapturedPiece) {
+                board.setPieceRaw(rec.epCapturedRow, rec.epCapturedCol, rec.epCapturedPiece);
+                rec.epCapturedPiece = nullptr;
+            }
+
+            // Undo castling rook
+            if (rec.rookMoved) {
+                Piece* rook = const_cast<Piece*>(board.getPiece(rec.rookToRow, rec.rookToCol));
+                rook->setPosition(rec.rookFromRow, rec.rookFromCol);
+                if (!rec.rookMovedFlagBefore) rook->unsetMoved();
+                board.setPieceRaw(rec.rookFromRow, rec.rookFromCol, rook);
+                board.setPieceRaw(rec.rookToRow,   rec.rookToCol,   nullptr);
+            }
+
+            history.pop();
         }
 };
 

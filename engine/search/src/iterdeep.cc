@@ -5,7 +5,7 @@
 
 #include <chrono>
 
-SearchResult IterDeep::search(Game& game, moveHistory& history, int timeLimitMs, int minDepth, int maxDepth) {
+SearchResult IterDeep::search(Game& game, MoveHistory& history, int timeLimitMs, int minDepth, int maxDepth) {
     auto startTime = std::chrono::steady_clock::now();
 
     auto elapsedMs = [&]() -> int {
