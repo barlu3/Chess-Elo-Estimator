@@ -1782,10 +1782,9 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     size_t    sizeBefore  = history.moveHistoryVector.size();
     int       stateBefore = history.currentBoardState;
     bool      turnBefore  = game.isWhiteTurn();
-    UI::printBoard(game.getBoard());
-    // IterDeep::search(game, history, 100, 1, 3);
-    AlphaBeta::search(game,history,4);
-    UI::printBoard(game.getBoard());
+
+    IterDeep::search(game, history, 100, 1, 3);
+
     EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
     EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
