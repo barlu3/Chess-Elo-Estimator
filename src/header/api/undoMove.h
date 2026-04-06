@@ -4,12 +4,6 @@
 #include "moveHistory.h"
 #include "Game.h"
 
-// class undoMove {
-//     public:
-//         static void undoLatestMove(moveHistory& currentGame, Board& currentBoard, Game& game);
-// };
-
-//temp class to see if fixes undoMove leakage
 class undoMove {
     public:
         static void undoLatestMove(MoveHistory& history, Game& game) {
@@ -23,14 +17,14 @@ class undoMove {
 
             game.setTurn(rec.whiteTurnBefore);
 
-            // Promotion: queen at dest is not the original piece — handle separately
+            // promotion: queen at dest is not the original piece — handle separately
             if (rec.wasPromotion) {
                 board.removePiece(rec.move.toRow, rec.move.toCol);  // delete queen
                 rec.promotedFromPiece->setPosition(rec.move.fromRow, rec.move.fromCol);
                 board.setPieceRaw(rec.move.fromRow, rec.move.fromCol, rec.promotedFromPiece);
                 rec.promotedFromPiece = nullptr;
 
-                // Restore any piece that was on the promotion square
+                // restore any piece that was on the promotion square
                 if (rec.capturedPiece) {
                     board.setPieceRaw(rec.move.toRow, rec.move.toCol, rec.capturedPiece);
                     rec.capturedPiece = nullptr;
@@ -40,7 +34,8 @@ class undoMove {
                 return;
             }
 
-            // Normal move: move piece back
+            // !!TODO!!: refactor, reduce code blaot
+            // normal move: move piece back
             Piece* mp = const_cast<Piece*>(board.getPiece(rec.move.toRow, rec.move.toCol));
             mp->setPosition(rec.move.fromRow, rec.move.fromCol);
             if (!rec.movedFlagBefore) mp->unsetMoved();
@@ -48,19 +43,19 @@ class undoMove {
             board.setPieceRaw(rec.move.fromRow, rec.move.fromCol, mp);
             board.setPieceRaw(rec.move.toRow,   rec.move.toCol,   nullptr);
 
-            // Restore captured piece — transfer ownership, don't clone
+            // restore captured piece — transfer ownership, don't clone
             if (rec.capturedPiece && !rec.enPassantCapture) {
                 board.setPieceRaw(rec.move.toRow, rec.move.toCol, rec.capturedPiece);
                 rec.capturedPiece = nullptr;
             }
 
-            // Restore en passant captured pawn — transfer ownership
+            // restore en passant captured pawn — transfer ownership
             if (rec.enPassantCapture && rec.epCapturedPiece) {
                 board.setPieceRaw(rec.epCapturedRow, rec.epCapturedCol, rec.epCapturedPiece);
                 rec.epCapturedPiece = nullptr;
             }
 
-            // Undo castling rook
+            // undo castling rook
             if (rec.rookMoved) {
                 Piece* rook = const_cast<Piece*>(board.getPiece(rec.rookToRow, rec.rookToCol));
                 rook->setPosition(rec.rookFromRow, rec.rookFromCol);

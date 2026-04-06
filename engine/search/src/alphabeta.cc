@@ -23,9 +23,10 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
     MoveOrder::orderMoves(moves, game.getBoard());
     
     for (const Move& move : moves) {
-        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!MoveExecutor::make(move, game, history)) continue;
+
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
+        
         MoveExecutor::undo(game,history);
 
         if (score >= beta) return beta;     //opponent wont allow this move
@@ -49,11 +50,10 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth) {
     long long beta = INF;
 
     for (auto move : moves) {
-        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!MoveExecutor::make(move, game, history)) continue;
         
         long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
-
+        
         MoveExecutor::undo(game, history);
 
         if (score > result.score) {

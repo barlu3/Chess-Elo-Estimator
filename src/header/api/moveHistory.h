@@ -10,7 +10,7 @@
 struct MoveRecord {
     Move move;
 
-    Piece* capturedPiece;
+    Piece* capturedPiece = nullptr;
 
     bool movedFlagBefore;
     bool enPassantBefore;
@@ -24,12 +24,13 @@ struct MoveRecord {
     int epCapturedRow, epCapturedCol;
     int enPassantClearedRow = -1;
     int enPassantClearedCol = -1;
-    Piece* epCapturedPiece;
+    Piece* epCapturedPiece = nullptr;
 
     bool wasPromotion;
-    Piece* promotedFromPiece;
+    Piece* promotedFromPiece = nullptr;
 
     bool whiteTurnBefore;
+    
 };
 
 class MoveHistory {

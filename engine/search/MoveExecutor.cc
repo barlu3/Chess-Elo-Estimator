@@ -37,8 +37,8 @@ bool MoveExecutor::make(const Move& move, Game& game, MoveHistory& history) {
     }
 
     rec.wasPromotion = isPawn &&
-                       ((sym == 'P' && move.toRow == 0) ||
-                        (sym == 'p' && move.toRow == 7));
+                        (move.toRow == 0 ||
+                        move.toRow == 7);
 
     if (isKing && std::abs(colDiff) == 2) {
         rec.rookMoved           = true;
@@ -69,17 +69,17 @@ bool MoveExecutor::make(const Move& move, Game& game, MoveHistory& history) {
         if (rec.enPassantClearedRow != -1) break;
     }
     
-    if (rec.enPassantClearedRow != -1) {
-        Piece* p = const_cast<Piece*>(
-            game.getBoard().getPiece(rec.enPassantClearedRow, rec.enPassantClearedCol));
-        if (p) p->setEnPassant(false);
-    }
-
     if (!game.performMove(move)) {
         delete rec.capturedPiece;
         delete rec.epCapturedPiece;
         delete rec.promotedFromPiece;
         return false;
+    }
+    
+    if (rec.enPassantClearedRow != -1) {
+        Piece* p = const_cast<Piece*>(
+            game.getBoard().getPiece(rec.enPassantClearedRow, rec.enPassantClearedCol));
+        if (p) p->setEnPassant(false);
     }
 
     history.push(std::move(rec));

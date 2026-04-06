@@ -36,12 +36,16 @@ long long Quiescence::quiescence(Game& game, MoveHistory& history, long long alp
     }
 
     //if we're in check with no moves, its a checkmate
-    if (inCheck && moves.empty()) return -100000;
+    if (inCheck && candidates.empty()) return -100000;
 
     for (const Move& move : candidates) {
+        
         if (!MoveExecutor::make(move, game, history)) continue;
+
         long long score = -quiescence(game, history, -beta, -alpha, checkDepth - 1);
+
         MoveExecutor::undo(game, history);
+       
         if (score >= beta) return beta;
         if (score > alpha) alpha = score;
     }

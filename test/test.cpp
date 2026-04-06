@@ -1783,10 +1783,8 @@ TEST(IterDeepTest, BoardAndHistoryRestoredAfterSearch) {
     int       stateBefore = history.currentBoardState;
     bool      turnBefore  = game.isWhiteTurn();
 
-    UI::printBoard(game.getBoard());
-    // IterDeep::search(game, history, 100, 1, 3);
-    AlphaBeta::search(game, history, 3);
-    UI::printBoard(game.getBoard());
+    IterDeep::search(game, history, 100, 1, 3);
+    
     EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore);
     EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore);
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);

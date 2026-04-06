@@ -108,6 +108,9 @@ const vector<Piece*> Board::Pieces() const {
 const Piece* Board::getPiece(int row, int column) const {
     return board[row][column];
 }
+Piece* Board::getPiece(int row, int column) {
+    return board[row][column];
+}
 void Board::setPiece(int row, int column, Piece* piece) {
     removePiece(row,column);
     board[row][column] = piece;
@@ -142,27 +145,32 @@ void Board::movePiece(const Move& move) {
     }
     //detect promotion, is this piece a pawn
     if (Pawn* p = dynamic_cast<Pawn*>(piece)) {
+        
+        // En Passant flag setting
+        int rowsMoved = abs(move.toRow - move.fromRow);
+        if (rowsMoved == 2) {
+            piece->setEnPassant(true);
+        }
+
+        // En Passant capture
+        // If a pawn moves diagonally into an empty square, it must be an en passant capture.
+        if (move.fromCol != move.toCol && board[move.toRow][move.toCol] == nullptr) {
+            removePiece(move.fromRow, move.toCol);
+        }
+
+        // Promotion
         bool whitePromo = p->getColor() && move.toRow == 0;
         bool blackPromo = (!p->getColor()) && move.toRow == 7;
-        //either white or black pawn promo
+        
         if (whitePromo || blackPromo) {
-            //no dangling pointer
+            // FIX: If capturing during promotion, remove the target piece first!
+            if (board[move.toRow][move.toCol] != nullptr) {
+                removePiece(move.toRow, move.toCol);
+            }
+            
             removePiece(move.fromRow, move.fromCol);
-            //hard code queen promotion (no choice)
             board[move.toRow][move.toCol] = new Queen(move.toRow, move.toCol, whitePromo);
-            return;
-        }
-    }
-    //en Passant flag
-    if (Pawn* p = dynamic_cast<Pawn*>(piece)) {
-        int rowsMoved = abs(move.toRow - move.fromRow);
-        if (rowsMoved == 2) {piece->setEnPassant(true);}
-    }
-
-    //en Passant capture
-    if (Pawn* p = dynamic_cast<Pawn*>(piece)) {
-        if (this->getPiece(move.fromRow, move.toCol) != nullptr && move.fromCol != move.toCol) {
-            removePiece(move.fromRow, move.toCol);
+            return; // We return early because promotion handles the actual board placement
         }
     }
 
@@ -174,6 +182,7 @@ void Board::movePiece(const Move& move) {
     piece->setPosition(move.toRow, move.toCol);
     piece->setMoved();
 }
+
 void Board::removePiece(int row, int column) {
     if (!(isEmpty(row, column))) {
         delete board[row][column];
