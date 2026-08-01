@@ -9,6 +9,8 @@ This project is built off a chess engine I built for my CS100 project at UCR alo
 
 In this, I design a Chess MiniMax algorithm that uses alpha-beta pruning and quiescence searching to optimize game state evaluation. I also explore data collection by fixing time constraints per engine move (1ms, 50ms, 100ms) and benchmarking this engine against established Chess bots/engines (Stockfish at different levels of difficulty).
 
+Elo estimation is planned for this project once benchmarking has been finished.
+
 ## Installation/Usage
 > * This Application is compiled in Linux, in 64-bits. Emulation may be required to run it.
 ### Prerequisites
