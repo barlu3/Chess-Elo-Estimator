@@ -89,8 +89,10 @@ add_executable(runChess
 
 )
 
-target_link_libraries(runChess)
-target_link_libraries(runAllTests gtest gtest_main)
+find_package(Threads REQUIRED)
+
+target_link_libraries(runChess Threads::Threads)
+target_link_libraries(runAllTests gtest gtest_main Threads::Threads)
 
 #only link stdc++fs for old GCC
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"

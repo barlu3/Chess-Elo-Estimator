@@ -9,6 +9,9 @@
 #include "search/header/quiescence.h"
 #include "search/header/ordering.h"
 
+#include <algorithm>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
@@ -33,7 +36,7 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
     return alpha;
 }
 
-SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth) {
+SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int threads) {
     static const long long INF = 1e18;
 
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
@@ -44,21 +47,72 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth) {
     result.score = -INF;
     result.bestMove = moves.empty() ? Move{-1, -1, -1, -1} : moves[0];
 
-    long long alpha = -INF;
-    long long beta = INF;
+    //hardware_concurrency() may report 0, so clamp before trusting it
+    unsigned int hw = std::thread::hardware_concurrency();
+    if (hw == 0) hw = 1;
 
-    for (auto move : moves) {
-        if (!MoveExecutor::make(move, game, history)) continue;
-        
-        long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
-        
-        MoveExecutor::undo(game, history);
+    int workerCount = threads;
+    if (workerCount > static_cast<int>(hw)) workerCount = static_cast<int>(hw);
+    if (workerCount > static_cast<int>(moves.size())) workerCount = static_cast<int>(moves.size());
 
-        if (score > result.score) {
-            result.score = score;
-            result.bestMove = move;
+    if (workerCount <= 1 || moves.empty()) {
+        long long alpha = -INF;
+        long long beta = INF;
+
+        for (auto move : moves) {
+            if (!MoveExecutor::make(move, game, history)) continue;
+
+            long long score = -alphabeta(game, history, depth - 1, -beta, -alpha);
+
+            MoveExecutor::undo(game, history);
+
+            if (score > result.score) {
+                result.score = score;
+                result.bestMove = move;
+            }
+            if (score > alpha) alpha = score;
         }
-        if (score > alpha) alpha = score;
+
+        return result;
+    }
+
+    //Parallel root. Workers share no state: each copies the Game (Board deep-copies
+    //its pieces) and builds its own MoveHistory, so make/undo never races. Each
+    //searches a full window because the narrowing alpha cannot be shared safely.
+    //Workers intentionally do not catch exceptions: like the sequential path, this
+    //search treats allocation failure as fatal, so a throw here ends the process.
+    std::mutex resultMutex;
+    long long bestScore = -INF;
+    size_t bestIndex = moves.size();
+
+    auto worker = [&](int workerId) {
+        for (size_t i = workerId; i < moves.size(); i += workerCount) {
+            Game localGame = game;
+            MoveHistory localHistory;
+
+            if (!MoveExecutor::make(moves[i], localGame, localHistory)) continue;
+
+            long long score = -alphabeta(localGame, localHistory, depth - 1, -INF, INF);
+
+            MoveExecutor::undo(localGame, localHistory);
+
+            std::lock_guard<std::mutex> lock(resultMutex);
+            //tie-break on the earliest root move so scheduling cannot change the answer
+            if (score > bestScore || (score == bestScore && i < bestIndex)) {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+    };
+
+    std::vector<std::thread> pool;
+    pool.reserve(workerCount);
+    for (int id = 0; id < workerCount; id++) pool.emplace_back(worker, id);
+    for (std::thread& t : pool) t.join();
+
+    if (bestIndex < moves.size()) {
+        result.score = bestScore;
+        result.bestMove = moves[bestIndex];
     }
 
     return result;

@@ -1867,3 +1867,136 @@ TEST(PSTTest, EvaluatorReflectsKnightImprovement) {
     EXPECT_GT(developedSq, startSquare)
         << "Knight on f3 should have higher PST value than on b1";
 }
+
+// ─────────────────────────────────────────────
+// PARALLEL ROOT SEARCH TESTS
+// ─────────────────────────────────────────────
+// AlphaBeta::search and IterDeep::search take an opt-in thread count.
+// threads<=1 keeps the original sequential path; threads>1 splits the ROOT
+// moves across workers, each with its own Game copy and fresh MoveHistory.
+// Parallel workers cannot share the narrowing alpha, so the node counts differ
+// from the sequential search — but the returned score must still agree, and
+// ties must break deterministically on the earliest root move.
+
+// The parallel root must agree with the sequential root on score.
+TEST(ParallelSearchTest, ScoreMatchesSequentialAtDepth2) {
+    Game g1, g2;
+    MoveHistory h1, h2;
+
+    SearchResult seq = AlphaBeta::search(g1, h1, 2, 1);
+    SearchResult par = AlphaBeta::search(g2, h2, 2, 4);
+
+    EXPECT_EQ(seq.score, par.score)
+        << "parallel root search disagrees with sequential search on score";
+}
+
+// Repeated parallel searches must return the same move and score every time,
+// regardless of how the OS happens to schedule the workers.
+TEST(ParallelSearchTest, DeterministicAcrossRepeatedRuns) {
+    Game ref;
+    MoveHistory refHistory;
+    SearchResult expected = AlphaBeta::search(ref, refHistory, 2, 4);
+
+    for (int i = 0; i < 10; i++) {
+        Game game;
+        MoveHistory history;
+        SearchResult result = AlphaBeta::search(game, history, 2, 4);
+
+        EXPECT_EQ(result.score, expected.score)
+            << "parallel search score varied between runs on iteration " << i;
+        EXPECT_EQ(result.bestMove.fromRow, expected.bestMove.fromRow)
+            << "parallel search bestMove varied between runs on iteration " << i;
+        EXPECT_EQ(result.bestMove.fromCol, expected.bestMove.fromCol)
+            << "parallel search bestMove varied between runs on iteration " << i;
+        EXPECT_EQ(result.bestMove.toRow, expected.bestMove.toRow)
+            << "parallel search bestMove varied between runs on iteration " << i;
+        EXPECT_EQ(result.bestMove.toCol, expected.bestMove.toCol)
+            << "parallel search bestMove varied between runs on iteration " << i;
+    }
+}
+
+// Workers operate on their own copies, so the caller's board, history and turn
+// must come back untouched — the same guarantee the sequential search gives.
+TEST(ParallelSearchTest, CallerStateUnmutated) {
+    Game game;
+    MoveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+    size_t    sizeBefore  = history.moveHistoryVector.size();
+    int       stateBefore = history.currentBoardState;
+    bool      turnBefore  = game.isWhiteTurn();
+
+    AlphaBeta::search(game, history, 2, 4);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore)
+        << "White material changed after parallel search — worker leaked into caller state";
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore)
+        << "Black material changed after parallel search — worker leaked into caller state";
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
+    EXPECT_EQ(history.currentBoardState, stateBefore);
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore);
+}
+
+// Degenerate thread counts must fall back to the sequential path, not crash or
+// spawn nonsense. hardware_concurrency() is allowed to return 0, so the
+// implementation clamps rather than trusting it.
+TEST(ParallelSearchTest, DegenerateThreadCountsFallBackToSequential) {
+    Game ref;
+    MoveHistory refHistory;
+    SearchResult expected = AlphaBeta::search(ref, refHistory, 2, 1);
+
+    for (int threads : {0, -1, 1}) {
+        Game game;
+        MoveHistory history;
+        SearchResult result = AlphaBeta::search(game, history, 2, threads);
+
+        EXPECT_EQ(result.score, expected.score)
+            << "threads=" << threads << " did not fall back to the sequential result";
+    }
+}
+
+// Asking for far more threads than there are root moves must still be correct.
+TEST(ParallelSearchTest, OversubscribedThreadCountStillCorrect) {
+    Game g1, g2;
+    MoveHistory h1, h2;
+
+    SearchResult seq = AlphaBeta::search(g1, h1, 1, 1);
+    SearchResult par = AlphaBeta::search(g2, h2, 1, 64);
+
+    EXPECT_EQ(seq.score, par.score)
+        << "oversubscribed parallel search disagrees with sequential search";
+}
+
+// IterDeep must thread the count through to the root search it drives.
+TEST(ParallelSearchTest, IterDeepAcceptsThreadCount) {
+    Game g1, g2;
+    MoveHistory h1, h2;
+
+    SearchResult seq = IterDeep::search(g1, h1, 5000, 1, 2, 1);
+    SearchResult par = IterDeep::search(g2, h2, 5000, 1, 2, 4);
+
+    EXPECT_EQ(seq.score, par.score)
+        << "IterDeep parallel run disagrees with sequential run on score";
+}
+
+// IterDeep reuses the caller's history across depth iterations; the parallel
+// path must leave that history and the board exactly as it found them.
+TEST(ParallelSearchTest, IterDeepParallelLeavesCallerStateIntact) {
+    Game game;
+    MoveHistory history;
+
+    long long whiteBefore = countMaterial(game.getBoard(), true);
+    long long blackBefore = countMaterial(game.getBoard(), false);
+    size_t    sizeBefore  = history.moveHistoryVector.size();
+    bool      turnBefore  = game.isWhiteTurn();
+
+    IterDeep::search(game, history, 100, 1, 3, 4);
+
+    EXPECT_EQ(countMaterial(game.getBoard(), true),  whiteBefore)
+        << "White material changed after parallel IterDeep — state is leaking";
+    EXPECT_EQ(countMaterial(game.getBoard(), false), blackBefore)
+        << "Black material changed after parallel IterDeep — state is leaking";
+    EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
+    EXPECT_EQ(game.isWhiteTurn(), turnBefore);
+}

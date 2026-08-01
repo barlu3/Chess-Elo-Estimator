@@ -5,7 +5,7 @@
 
 #include <chrono>
 
-SearchResult IterDeep::search(Game& game, MoveHistory& history, int timeLimitMs, int minDepth, int maxDepth) {
+SearchResult IterDeep::search(Game& game, MoveHistory& history, int timeLimitMs, int minDepth, int maxDepth, int threads) {
     auto startTime = std::chrono::steady_clock::now();
 
     auto elapsedMs = [&]() -> int {
@@ -19,7 +19,7 @@ SearchResult IterDeep::search(Game& game, MoveHistory& history, int timeLimitMs,
     best.bestMove = {-1,-1,-1,-1};
 
     for (int depth = minDepth; depth <= maxDepth; depth++) {
-        SearchResult result = AlphaBeta::search(game, history, depth);
+        SearchResult result = AlphaBeta::search(game, history, depth, threads);
 
         //if we completed the result accept the result always
         best = result;
