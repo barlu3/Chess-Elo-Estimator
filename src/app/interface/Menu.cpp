@@ -7,8 +7,6 @@
 #include "Game.h"
 #include "StockfishAI.h"
 #include "api/moveHistory.h"
-#include "api/undoMove.h"
-#include "api/convertMoveToString.h"
 #include "search/MoveExecutor.h"
 
 #include <iostream>
@@ -144,8 +142,6 @@ void Menu::startBotGame(int difficulty) {
 
     Game game;
     MoveHistory moveHistory;
-    convertMoveToString converter;
-    undoMove undoMove;
 
     while (true) {
         UI::printBoard(game.getBoard());

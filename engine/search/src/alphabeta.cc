@@ -2,8 +2,6 @@
 #include "Pieces.h"
 #include "api/Board.h"
 #include "api/moveHistory.h"
-#include "api/undoMove.h"
-#include "api/convertMoveToString.h"
 
 #include "search/MoveExecutor.h"
 

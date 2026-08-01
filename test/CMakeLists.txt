@@ -23,7 +23,6 @@ add_executable(runAllTests
     ../src/app/api/Board.cpp
     ../src/app/api/moveHistory.cpp
     ../src/app/api/convertMoveToString.cpp
-    ../src/app/api/undoMove.cpp
 
     ../src/app/data/SaveGame.cpp
     ../src/app/data/LoadGame.cpp
@@ -63,7 +62,6 @@ add_executable(runChess
     ../src/app/api/Board.cpp
     ../src/app/api/moveHistory.cpp
     ../src/app/api/convertMoveToString.cpp
-    ../src/app/api/undoMove.cpp
 
     ../src/app/data/SaveGame.cpp
     ../src/app/data/LoadGame.cpp

@@ -2,8 +2,6 @@
 #include "Pieces.h"
 #include "api/Board.h"
 #include "api/moveHistory.h"
-#include "api/undoMove.h"
-#include "api/convertMoveToString.h"
 
 #include "search/MoveExecutor.h"
 
@@ -26,7 +24,6 @@ long long NegaMax::negamax(Game& game, MoveHistory& history, int depth) {
 
     long long best = -1e18;
     for (auto move : moves) {
-        // std::string record = convertMoveToString::moveAsString(move, game.getBoard());
         if (!MoveExecutor::make(move, game, history)) continue;                                                                 //pseudo perform the move append latest move to move history
 
         best = std::max(best,-negamax(game, history, depth - 1));                                                            //set best score recursively calculate the best move
