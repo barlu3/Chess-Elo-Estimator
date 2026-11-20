@@ -17,6 +17,7 @@ class AlphaBeta {
         //benchmark switches: defaults are the normal engine; set them before search(), never during one
         static inline bool pruning = true;   //beta cutoff in alphabeta()
         static inline bool ordering = true;  //MoveOrder::orderMoves at the root and inside alphabeta()
+        static inline bool quiescence = true; //false: depth-0 nodes return Evaluator::evaluate instead of calling quiescence
         //per-thread call counter; search() sums the workers' counters into SearchResult
         static inline thread_local long long nodes = 0;
 

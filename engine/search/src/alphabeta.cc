@@ -8,6 +8,7 @@
 #include "search/header/alphabeta.h"
 #include "search/header/quiescence.h"
 #include "search/header/ordering.h"
+#include "eval/material.h"
 
 #include <algorithm>
 #include <mutex>
@@ -16,7 +17,7 @@
 
 long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
     nodes++;
-    if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta, 1);
+    if (depth == 0) return quiescence ? Quiescence::quiescence(game, history, alpha, beta, 1) : Evaluator::evaluate(game);
 
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
 

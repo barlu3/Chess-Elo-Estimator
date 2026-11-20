@@ -2147,3 +2147,48 @@ TEST(NodeCountTest, DefaultsPruneAndKeepScore) {
     AlphaBeta::pruning = true;
     AlphaBeta::ordering = true;
 }
+
+TEST(NodeCountTest, StaticEvalLeavesPruningOffCountsFullTree) {
+    const bool savedQuiescence = AlphaBeta::quiescence;
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::quiescence = false;
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+
+    Game g;
+    MoveHistory h;
+    SearchResult r = AlphaBeta::search(g, h, 3, 1);
+
+    EXPECT_EQ(r.mainNodes, 9322);
+    EXPECT_EQ(r.quiescenceNodes, 0);
+
+    AlphaBeta::quiescence = savedQuiescence;
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
+
+TEST(NodeCountTest, StaticEvalLeavesAbAndMvvSameScore) {
+    const bool savedQuiescence = AlphaBeta::quiescence;
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::quiescence = false;
+    AlphaBeta::pruning = true;
+
+    AlphaBeta::ordering = false;
+    Game gOff;
+    MoveHistory hOff;
+    SearchResult off = AlphaBeta::search(gOff, hOff, 3, 1);
+
+    AlphaBeta::ordering = true;
+    Game gOn;
+    MoveHistory hOn;
+    SearchResult on = AlphaBeta::search(gOn, hOn, 3, 1);
+
+    EXPECT_EQ(on.score, off.score);
+    EXPECT_LT(on.mainNodes, 9322);
+
+    AlphaBeta::quiescence = savedQuiescence;
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
