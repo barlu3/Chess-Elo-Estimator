@@ -37,6 +37,8 @@ class Board {
         bool isStalemate(bool isWhite) const;
         bool hasLegalMoves(bool isWhite) const;
         std::string toFEN(bool isWhite) const;
+        //loads a FEN (4 to 6 fields); returns false and leaves the board unchanged if the FEN is malformed
+        bool loadFEN(const std::string& fen, bool& isWhite);
 };
 
 #endif
