@@ -6,6 +6,7 @@ saves
 /test/lib
 /test/CMakeFiles
 /test/bin
+/build-bench
 .vscode
 /test/_deps
 test/CTestTestfile.cmake
