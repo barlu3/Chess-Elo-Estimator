@@ -24,6 +24,7 @@
 #include "../engine/search/header/alphabeta.h"
 #include "../engine/search/header/ordering.h"
 #include "../engine/search/header/iterdeep.h"
+#include "../engine/search/MoveExecutor.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
@@ -1999,4 +2000,150 @@ TEST(ParallelSearchTest, IterDeepParallelLeavesCallerStateIntact) {
         << "Black material changed after parallel IterDeep — state is leaking";
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
     EXPECT_EQ(game.isWhiteTurn(), turnBefore);
+}
+
+// ─────────────────────────────────────────────
+// FEN LOADER AND SEARCH COUNTER TESTS
+// ─────────────────────────────────────────────
+
+// Counts the move tree to a fixed depth; each node counts itself plus its children.
+static long long countTree(Game& game, MoveHistory& history, int depth) {
+    if (depth == 0) return 1;
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
+    if (moves.empty()) return 1;
+    long long total = 1;
+    for (const Move& move : moves) {
+        if (!MoveExecutor::make(move, game, history)) continue;
+        total += countTree(game, history, depth - 1);
+        MoveExecutor::undo(game, history);
+    }
+    return total;
+}
+
+// Keeps only "placement side" so round-trips ignore castling, en passant and clocks.
+static std::string placementAndSide(const std::string& fen) {
+    size_t firstSpace = fen.find(' ');
+    size_t secondSpace = fen.find(' ', firstSpace + 1);
+    return fen.substr(0, secondSpace);
+}
+
+static bool hasMove(const std::vector<Move>& moves, int fr, int fc, int tr, int tc) {
+    for (const Move& m : moves) {
+        if (m.fromRow == fr && m.fromCol == fc && m.toRow == tr && m.toCol == tc) return true;
+    }
+    return false;
+}
+
+TEST(FenTest, RoundTripsPlacementAndSide) {
+    const std::vector<std::string> fens = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1",
+        "r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q1n2N2/PP3PPP/3R1K1R b - - 1 17",
+    };
+    for (const std::string& fen : fens) {
+        Game g;
+        ASSERT_TRUE(g.loadFEN(fen)) << fen;
+        EXPECT_EQ(placementAndSide(g.getBoard().toFEN(g.isWhiteTurn())), placementAndSide(fen)) << fen;
+    }
+}
+
+TEST(FenTest, StartFenMatchesDefaultGameTreeCount) {
+    Game a;
+    MoveHistory ha;
+    Game b;
+    MoveHistory hb;
+    ASSERT_TRUE(b.loadFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
+
+    long long countA = countTree(a, ha, 3);
+    long long countB = countTree(b, hb, 3);
+
+    EXPECT_EQ(countA, countB);
+    EXPECT_EQ(countA, 9323);
+}
+
+TEST(FenTest, NoCastlingWithoutRight) {
+    Game noKingside;
+    ASSERT_TRUE(noKingside.loadFEN("r3k2r/8/8/8/8/8/8/R3K2R w Qkq - 0 1"));
+    std::vector<Move> moves = MoveExecutor::generateMoves(noKingside);
+    EXPECT_FALSE(hasMove(moves, 7, 4, 7, 6)) << "kingside castle generated without the K right";
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 2));
+
+    Game withRights;
+    ASSERT_TRUE(withRights.loadFEN("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"));
+    moves = MoveExecutor::generateMoves(withRights);
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 6));
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 2));
+}
+
+TEST(FenTest, EnPassantSquareProducesCapture) {
+    Game withEp;
+    MoveHistory history;
+    ASSERT_TRUE(withEp.loadFEN("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1"));
+    EXPECT_TRUE(hasMove(MoveExecutor::generateMoves(withEp), 3, 4, 2, 3));
+
+    Game withoutEp;
+    ASSERT_TRUE(withoutEp.loadFEN("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1"));
+    EXPECT_FALSE(hasMove(MoveExecutor::generateMoves(withoutEp), 3, 4, 2, 3));
+
+    EXPECT_TRUE(MoveExecutor::make(Move{3, 4, 2, 3}, withEp, history));
+    EXPECT_EQ(withEp.getBoard().getPiece(3, 3), nullptr);
+    EXPECT_NE(dynamic_cast<Pawn*>(withEp.getBoard().getPiece(2, 3)), nullptr);
+}
+
+TEST(FenTest, InvalidFenFailsAndLeavesGameUnchanged) {
+    const std::vector<std::string> invalid = {
+        "",
+        "x",
+        "8/8/8/8/8/8/8/8 w - -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN w KQkq -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR x KQkq -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkqX -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e4",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e3",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR/8 w KQkq -",
+    };
+    for (const std::string& fen : invalid) {
+        Game g;
+        EXPECT_FALSE(g.loadFEN(fen)) << fen;
+        EXPECT_EQ(g.getBoard().toFEN(true), Game().getBoard().toFEN(true)) << fen;
+        EXPECT_TRUE(g.isWhiteTurn()) << fen;
+    }
+}
+
+TEST(NodeCountTest, PruningOffCountsFullTreeAcrossThreads) {
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+
+    Game g1, g2;
+    MoveHistory h1, h2;
+    SearchResult r1 = AlphaBeta::search(g1, h1, 3, 1);
+    SearchResult r2 = AlphaBeta::search(g2, h2, 3, 4);
+
+    EXPECT_EQ(r1.mainNodes, 9322);
+    EXPECT_EQ(r2.mainNodes, r1.mainNodes) << "worker node counts were not merged";
+    EXPECT_GT(r1.quiescenceNodes, 0);
+    EXPECT_EQ(r1.score, r2.score);
+
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
+
+TEST(NodeCountTest, DefaultsPruneAndKeepScore) {
+    Game gOn, gOff;
+    MoveHistory hOn, hOff;
+    SearchResult on = AlphaBeta::search(gOn, hOn, 3, 1);
+
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+    SearchResult off = AlphaBeta::search(gOff, hOff, 3, 1);
+
+    EXPECT_LT(on.mainNodes, off.mainNodes);
+    EXPECT_EQ(on.score, off.score);
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
 }

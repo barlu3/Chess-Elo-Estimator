@@ -15,13 +15,14 @@
 #include <vector>
 
 long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
+    nodes++;
     if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta, 1);
 
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
     if (moves.empty()) return game.getBoard().isInCheck(game.isWhiteTurn()) ? -100000 : 0;
 
-    MoveOrder::orderMoves(moves, game.getBoard());
+    if (ordering) MoveOrder::orderMoves(moves, game.getBoard());
     
     for (const Move& move : moves) {
         if (!MoveExecutor::make(move, game, history)) continue;
@@ -30,7 +31,7 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
         
         MoveExecutor::undo(game,history);
 
-        if (score >= beta) return beta;     //opponent wont allow this move
+        if (pruning && score >= beta) return beta;     //opponent wont allow this move
         if (score > alpha) alpha = score;   //next best move for player
     }
     return alpha;
@@ -39,9 +40,12 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
 SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int threads) {
     static const long long INF = 1e18;
 
+    nodes = 0;
+    Quiescence::nodes = 0;
+
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
-    MoveOrder::orderMoves(moves, game.getBoard());
+    if (ordering) MoveOrder::orderMoves(moves, game.getBoard());
 
     SearchResult result;
     result.score = -INF;
@@ -73,6 +77,8 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
             if (score > alpha) alpha = score;
         }
 
+        result.mainNodes = nodes;
+        result.quiescenceNodes = Quiescence::nodes;
         return result;
     }
 
@@ -84,6 +90,7 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
     std::mutex resultMutex;
     long long bestScore = -INF;
     size_t bestIndex = moves.size();
+    long long mainTotal = 0, quiescenceTotal = 0;
 
     auto worker = [&](int workerId) {
         for (size_t i = workerId; i < moves.size(); i += workerCount) {
@@ -103,6 +110,10 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
                 bestIndex = i;
             }
         }
+
+        std::lock_guard<std::mutex> lock(resultMutex);
+        mainTotal += nodes;                 //each worker is a fresh thread, so its counters start at 0
+        quiescenceTotal += Quiescence::nodes;
     };
 
     std::vector<std::thread> pool;
@@ -115,5 +126,7 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
         result.bestMove = moves[bestIndex];
     }
 
+    result.mainNodes = mainTotal;
+    result.quiescenceNodes = quiescenceTotal;
     return result;
 }
