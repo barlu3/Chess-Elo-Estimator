@@ -106,6 +106,7 @@ static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool 
     MoveHistory history;
     AlphaBeta::pruning = pruning;
     AlphaBeta::ordering = ordering;
+    AlphaBeta::quiescence = false; // C1 compares main-search nodes with static-eval leaves
 
     auto start = std::chrono::steady_clock::now();
     SearchResult result = AlphaBeta::search(g, history, depth, 1);
@@ -113,6 +114,7 @@ static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool 
 
     AlphaBeta::pruning = true;
     AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = true;
     return result;
 }
 
@@ -130,8 +132,8 @@ static void printBuildInfo() {
 static void printSearch(const char* label, const Game& game, int depth, bool ordering) {
     double ms = 0;
     SearchResult r = timedSearch(game, depth, true, ordering, ms);
-    std::printf("%s d%d main=%lld q=%lld score=%lld s=%.2f\n", label, depth,
-                r.mainNodes, r.quiescenceNodes, r.score, ms / 1000.0);
+    std::printf("%s d%d main=%lld score=%lld s=%.2f\n", label, depth,
+                r.mainNodes, r.score, ms / 1000.0);
     std::fflush(stdout);
 }
 
@@ -146,45 +148,26 @@ static int probe(const std::string& path, const std::string& id) {
     CHECK(found != nullptr);
     const Game& game = found->game;
 
+    printSearch("mvv", game, 5, true);
+    printSearch("ab", game, 5, false);
+    printSearch("mvv", game, 6, true);
+    printSearch("ab", game, 6, false);
+
     auto start = std::chrono::steady_clock::now();
     long long nodes = negamaxNodes(game, 5);
     double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     std::printf("negamax d5 nodes=%lld s=%.2f\n", nodes, s);
     std::fflush(stdout);
-
-    printSearch("mvv", game, 5, true);
-    printSearch("ab", game, 5, false);
-    printSearch("mvv", game, 6, true);
-    printSearch("ab", game, 6, false);
     return 0;
 }
 
 struct Row {
     std::string id, category;
-    long long neg5, ab5Main, ab5Q, mvv5Main, mvv5Q, score5Ab, score5Mvv;
+    long long neg5, ab5Main, mvv5Main, score5Ab, score5Mvv;
     double ab5Ms, mvv5Ms;
-    long long ab6Main, ab6Q, mvv6Main, mvv6Q;
+    long long ab6Main, mvv6Main;
     double ab6Ms, mvv6Ms;
 };
-
-// shortcut: depth-6 timing is a single run (counts are deterministic), raise if C3 needs depth-6 medians
-static const int kRuns6 = 1;
-
-// Runs the search `runs` times; node counts and score must match across runs.
-static SearchResult measure(const Game& game, int depth, bool ordering, int runs, double& medianMs) {
-    std::vector<double> times;
-    SearchResult first{};
-    for (int i = 0; i < runs; i++) {
-        double ms = 0;
-        SearchResult r = timedSearch(game, depth, true, ordering, ms);
-        if (i == 0) first = r;
-        CHECK(r.mainNodes == first.mainNodes && r.quiescenceNodes == first.quiescenceNodes && r.score == first.score);
-        times.push_back(ms);
-    }
-    std::sort(times.begin(), times.end());
-    medianMs = times[times.size() / 2];
-    return first;
-}
 
 // Pruning-off search must visit the same tree as the node-only count; pruning and ordering must not change the score.
 static void identityCheck(const Position& p, int depth, int& mismatches) {
@@ -220,7 +203,7 @@ static void printAggregate(const char* mode, const std::vector<Row>& rows, bool 
                 "min = %.2f, max = %.2f\n", mode, median, savedPct(sumMain, sumNeg), pct.front(), pct.back());
 }
 
-static int run(const std::string& epdPath, const std::string& csvPath) {
+static int run(const std::string& epdPath, const std::string& csvPath, bool withDepth6) {
     printBuildInfo();
     std::vector<Position> positions = loadPositions(epdPath);
     CHECK(!positions.empty());
@@ -244,56 +227,65 @@ static int run(const std::string& epdPath, const std::string& csvPath) {
     std::ofstream csv(csvPath);
     CHECK(csv.is_open());
     csv << std::fixed << std::setprecision(3);
-    csv << "id,category,negamax5,ab5_main,ab5_q,ab5_ms,mvv5_main,mvv5_q,mvv5_ms,score5_ab,score5_mvv,"
-           "ab6_main,ab6_q,ab6_ms,mvv6_main,mvv6_q,mvv6_ms\n";
+    csv << "id,category,negamax5,ab5_main,ab5_ms,mvv5_main,mvv5_ms,score5_ab,score5_mvv";
+    if (withDepth6) csv << ",ab6_main,ab6_ms,mvv6_main,mvv6_ms";
+    csv << '\n';
     csv.flush();
 
     std::vector<Row> rows;
-    for (const Position& p : positions) {
+    for (size_t i = 0; i < positions.size(); i++) {
+        const Position& p = positions[i];
         Row r;
         r.id = p.id;
         r.category = p.category;
         r.neg5 = negamaxNodes(p.game, 5);
 
-        SearchResult ab5 = measure(p.game, 5, false, 3, r.ab5Ms);
-        SearchResult mvv5 = measure(p.game, 5, true, 3, r.mvv5Ms);
+        SearchResult ab5 = timedSearch(p.game, 5, true, false, r.ab5Ms);
+        SearchResult mvv5 = timedSearch(p.game, 5, true, true, r.mvv5Ms);
+        // Node counts are deterministic; a repeat on 3 positions is enough to show it.
+        if (i < 3) {
+            double repeatMs = 0;
+            SearchResult again = timedSearch(p.game, 5, true, true, repeatMs);
+            CHECK(again.mainNodes == mvv5.mainNodes && again.score == mvv5.score);
+        }
         if (ab5.score != mvv5.score) {
             std::fprintf(stderr, "ROOT SCORE MISMATCH id=%s ab=%lld mvv=%lld\n", p.id.c_str(), ab5.score, mvv5.score);
             mismatches++;
         }
-        SearchResult ab6 = measure(p.game, 6, false, kRuns6, r.ab6Ms);
-        SearchResult mvv6 = measure(p.game, 6, true, kRuns6, r.mvv6Ms);
 
         r.ab5Main = ab5.mainNodes;
-        r.ab5Q = ab5.quiescenceNodes;
         r.score5Ab = ab5.score;
         r.mvv5Main = mvv5.mainNodes;
-        r.mvv5Q = mvv5.quiescenceNodes;
         r.score5Mvv = mvv5.score;
-        r.ab6Main = ab6.mainNodes;
-        r.ab6Q = ab6.quiescenceNodes;
-        r.mvv6Main = mvv6.mainNodes;
-        r.mvv6Q = mvv6.quiescenceNodes;
+        if (withDepth6) {
+            SearchResult ab6 = timedSearch(p.game, 6, true, false, r.ab6Ms);
+            SearchResult mvv6 = timedSearch(p.game, 6, true, true, r.mvv6Ms);
+            r.ab6Main = ab6.mainNodes;
+            r.mvv6Main = mvv6.mainNodes;
+        }
 
         std::printf("%s neg5=%lld ab5_main=%lld mvv5_main=%lld\n", r.id.c_str(), r.neg5, r.ab5Main, r.mvv5Main);
         std::fflush(stdout);
 
-        csv << r.id << ',' << r.category << ',' << r.neg5 << ',' << r.ab5Main << ',' << r.ab5Q << ',' << r.ab5Ms << ','
-            << r.mvv5Main << ',' << r.mvv5Q << ',' << r.mvv5Ms << ',' << r.score5Ab << ',' << r.score5Mvv << ','
-            << r.ab6Main << ',' << r.ab6Q << ',' << r.ab6Ms << ',' << r.mvv6Main << ',' << r.mvv6Q << ',' << r.mvv6Ms
-            << '\n';
+        csv << r.id << ',' << r.category << ',' << r.neg5 << ',' << r.ab5Main << ',' << r.ab5Ms << ','
+            << r.mvv5Main << ',' << r.mvv5Ms << ',' << r.score5Ab << ',' << r.score5Mvv;
+        if (withDepth6) csv << ',' << r.ab6Main << ',' << r.ab6Ms << ',' << r.mvv6Main << ',' << r.mvv6Ms;
+        csv << '\n';
         csv.flush();
         rows.push_back(r);
     }
 
-    std::printf("\n| id | category | negamax | ab | ab+mvvlva | %% saved ab | %% saved ab+mvvlva | q nodes ab | "
-                "q nodes ab+mvvlva | d6 ab main | d6 ab q | d6 ab+mvvlva main | d6 ab+mvvlva q |\n");
-    std::printf("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+    std::printf("\nMain-search nodes, fixed depth 5, static-eval leaves (quiescence off in all modes)\n");
+    std::printf("| id | category | negamax | ab | ab+mvvlva | %% saved ab | %% saved ab+mvvlva |");
+    if (withDepth6) std::printf(" d6 ab | d6 ab+mvvlva |");
+    std::printf("\n|---|---|---|---|---|---|---|");
+    if (withDepth6) std::printf("---|---|");
+    std::printf("\n");
     for (const Row& r : rows) {
-        std::printf("| %s | %s | %lld | %lld | %lld | %.2f | %.2f | %lld | %lld | %lld | %lld | %lld | %lld |\n",
-                    r.id.c_str(), r.category.c_str(), r.neg5, r.ab5Main, r.mvv5Main,
-                    savedPct(r.ab5Main, r.neg5), savedPct(r.mvv5Main, r.neg5), r.ab5Q, r.mvv5Q,
-                    r.ab6Main, r.ab6Q, r.mvv6Main, r.mvv6Q);
+        std::printf("| %s | %s | %lld | %lld | %lld | %.2f | %.2f |", r.id.c_str(), r.category.c_str(), r.neg5,
+                    r.ab5Main, r.mvv5Main, savedPct(r.ab5Main, r.neg5), savedPct(r.mvv5Main, r.neg5));
+        if (withDepth6) std::printf(" %lld | %lld |", r.ab6Main, r.mvv6Main);
+        std::printf("\n");
     }
     std::printf("\n");
     printAggregate("ab", rows, false);
@@ -305,7 +297,8 @@ static int run(const std::string& epdPath, const std::string& csvPath) {
 int main(int argc, char** argv) {
     std::string cmd = argc > 1 ? argv[1] : "";
     if (cmd == "probe" && argc == 4) return probe(argv[2], argv[3]);
-    if (cmd == "run" && argc == 4) return run(argv[2], argv[3]);
-    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n");
+    if (cmd == "run" && argc == 4) return run(argv[2], argv[3], false);
+    if (cmd == "run" && argc == 5 && std::string(argv[4]) == "d6") return run(argv[2], argv[3], true);
+    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv> [d6]\n");
     return 1;
 }
