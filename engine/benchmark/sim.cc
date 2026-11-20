@@ -165,8 +165,8 @@ struct Row {
     std::string id, category;
     long long neg5, ab5Main, mvv5Main, score5Ab, score5Mvv;
     double ab5Ms, mvv5Ms;
-    long long ab6Main, mvv6Main;
-    double ab6Ms, mvv6Ms;
+    long long mvv6Main;
+    double mvv6Ms;
 };
 
 // Pruning-off search must visit the same tree as the node-only count; pruning and ordering must not change the score.
@@ -203,7 +203,7 @@ static void printAggregate(const char* mode, const std::vector<Row>& rows, bool 
                 "min = %.2f, max = %.2f\n", mode, median, savedPct(sumMain, sumNeg), pct.front(), pct.back());
 }
 
-static int run(const std::string& epdPath, const std::string& csvPath, bool withDepth6) {
+static int run(const std::string& epdPath, const std::string& csvPath) {
     printBuildInfo();
     std::vector<Position> positions = loadPositions(epdPath);
     CHECK(!positions.empty());
@@ -227,9 +227,7 @@ static int run(const std::string& epdPath, const std::string& csvPath, bool with
     std::ofstream csv(csvPath);
     CHECK(csv.is_open());
     csv << std::fixed << std::setprecision(3);
-    csv << "id,category,negamax5,ab5_main,ab5_ms,mvv5_main,mvv5_ms,score5_ab,score5_mvv";
-    if (withDepth6) csv << ",ab6_main,ab6_ms,mvv6_main,mvv6_ms";
-    csv << '\n';
+    csv << "id,category,negamax5,ab5_main,ab5_ms,mvv5_main,mvv5_ms,score5_ab,score5_mvv,mvv6_main,mvv6_ms\n";
     csv.flush();
 
     std::vector<Row> rows;
@@ -257,35 +255,27 @@ static int run(const std::string& epdPath, const std::string& csvPath, bool with
         r.score5Ab = ab5.score;
         r.mvv5Main = mvv5.mainNodes;
         r.score5Mvv = mvv5.score;
-        if (withDepth6) {
-            SearchResult ab6 = timedSearch(p.game, 6, true, false, r.ab6Ms);
-            SearchResult mvv6 = timedSearch(p.game, 6, true, true, r.mvv6Ms);
-            r.ab6Main = ab6.mainNodes;
-            r.mvv6Main = mvv6.mainNodes;
-        }
+        // ab at depth 6 is omitted: it takes up to 22 minutes per position.
+        SearchResult mvv6 = timedSearch(p.game, 6, true, true, r.mvv6Ms);
+        r.mvv6Main = mvv6.mainNodes;
 
         std::printf("%s neg5=%lld ab5_main=%lld mvv5_main=%lld\n", r.id.c_str(), r.neg5, r.ab5Main, r.mvv5Main);
         std::fflush(stdout);
 
         csv << r.id << ',' << r.category << ',' << r.neg5 << ',' << r.ab5Main << ',' << r.ab5Ms << ','
-            << r.mvv5Main << ',' << r.mvv5Ms << ',' << r.score5Ab << ',' << r.score5Mvv;
-        if (withDepth6) csv << ',' << r.ab6Main << ',' << r.ab6Ms << ',' << r.mvv6Main << ',' << r.mvv6Ms;
-        csv << '\n';
+            << r.mvv5Main << ',' << r.mvv5Ms << ',' << r.score5Ab << ',' << r.score5Mvv << ','
+            << r.mvv6Main << ',' << r.mvv6Ms << '\n';
         csv.flush();
         rows.push_back(r);
     }
 
     std::printf("\nMain-search nodes, fixed depth 5, static-eval leaves (quiescence off in all modes)\n");
-    std::printf("| id | category | negamax | ab | ab+mvvlva | %% saved ab | %% saved ab+mvvlva |");
-    if (withDepth6) std::printf(" d6 ab | d6 ab+mvvlva |");
-    std::printf("\n|---|---|---|---|---|---|---|");
-    if (withDepth6) std::printf("---|---|");
-    std::printf("\n");
+    std::printf("Depth 6 column: ab+mvvlva only; ab at depth 6 omitted (up to 22 min per position).\n");
+    std::printf("| id | category | negamax | ab | ab+mvvlva | %% saved ab | %% saved ab+mvvlva | d6 ab+mvvlva |\n");
+    std::printf("|---|---|---|---|---|---|---|---|\n");
     for (const Row& r : rows) {
-        std::printf("| %s | %s | %lld | %lld | %lld | %.2f | %.2f |", r.id.c_str(), r.category.c_str(), r.neg5,
-                    r.ab5Main, r.mvv5Main, savedPct(r.ab5Main, r.neg5), savedPct(r.mvv5Main, r.neg5));
-        if (withDepth6) std::printf(" %lld | %lld |", r.ab6Main, r.mvv6Main);
-        std::printf("\n");
+        std::printf("| %s | %s | %lld | %lld | %lld | %.2f | %.2f | %lld |\n", r.id.c_str(), r.category.c_str(), r.neg5,
+                    r.ab5Main, r.mvv5Main, savedPct(r.ab5Main, r.neg5), savedPct(r.mvv5Main, r.neg5), r.mvv6Main);
     }
     std::printf("\n");
     printAggregate("ab", rows, false);
@@ -297,8 +287,7 @@ static int run(const std::string& epdPath, const std::string& csvPath, bool with
 int main(int argc, char** argv) {
     std::string cmd = argc > 1 ? argv[1] : "";
     if (cmd == "probe" && argc == 4) return probe(argv[2], argv[3]);
-    if (cmd == "run" && argc == 4) return run(argv[2], argv[3], false);
-    if (cmd == "run" && argc == 5 && std::string(argv[4]) == "d6") return run(argv[2], argv[3], true);
-    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv> [d6]\n");
+    if (cmd == "run" && argc == 4) return run(argv[2], argv[3]);
+    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n");
     return 1;
 }
