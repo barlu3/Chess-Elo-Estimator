@@ -106,3 +106,81 @@ mkdir -p engine/benchmark/results && cmake -S test -B build-bench -DCMAKE_BUILD_
 
 `bench` prints the compiler and flags, the identity-check progress, and the markdown table and aggregates shown
 above. Keep the machine otherwise idle while it runs, because the timed searches share the CPU.
+
+## C2: how does the search scale across threads?
+
+Status: the diagnosis and the fix below are done. The 1/2/4/8-thread measurement over the 20 positions
+(`c2.sh`, `c2_summary.py`) has not been run yet: the machine went to sleep (lid closed, on battery) and wall times
+taken in that state are meaningless. `c2.sh` now refuses to run on battery or with the lid closed.
+
+### Before the fix (indicative, one run per cell, AC power, lid open)
+
+Configuration: ab+mvvlva (`pruning = true`, `ordering = true`), static-eval leaves (`quiescence = false`), depth 6,
+the same as C1's depth-6 measurement. The original parallel root gave every root move a full window and dealt moves
+round-robin (`i += workerCount`).
+
+| position | threads | wall s | speedup | main nodes | node inflation |
+|---|---|---|---|---|---|
+| mg7 | 1 | 70.9 | 1.00 | 2,744,459 | 1.00 |
+| mg7 | 2 | 183.9 | 0.39 | 7,121,575 | 2.60 |
+| mg7 | 4 | 89.1 | 0.80 | 7,121,575 | 2.60 |
+| mg7 | 8 | 55.0 | 1.29 | 7,121,575 | 2.60 |
+| mg4 | 1 | 29.2 | 1.00 | 1,407,833 | 1.00 |
+| mg4 | 8 | 75.9 | 0.38 | 9,623,312 | 6.84 |
+
+Best move and score were identical at every thread count (mg7 `43-21` -80, mg4 `64-74` -110).
+
+### Diagnosis (before the fix)
+
+1. **Load imbalance is small.** `bench split` (full-window subtree size per ordered root move, depth 6) gives the
+   per-worker node load under the round-robin split. Busiest worker divided by mean worker: mg7 1.10 / 1.19 / 1.29
+   and mg4 1.10 / 1.20 / 1.31 at 2 / 4 / 8 workers. The largest single root subtree is 4.7% of mg7's total, so no
+   root move dominates.
+2. **Node inflation dominates.** Full-window root searches visit 2.59x (mg7) and 6.84x (mg4) the sequential nodes.
+   Even with perfect per-node speed and the measured imbalance, the node-bound speedup (sequential nodes divided by
+   the busiest worker's nodes) is 0.70 / 1.29 / 2.38 on mg7 and 0.26 / 0.49 / 0.89 on mg4. Two threads cannot beat
+   one on either position.
+3. **Per-node speed also drops inside one process.**
+   - Hardware alone, mg7 depth 6, N separate 1-thread processes started together: nodes per second per process was
+     38.7k solo, 36.6k at N=2 (0.94x), 28.1k at N=4 (0.73x), 14.4k at N=8 (0.37x).
+   - The in-process workers' busiest-worker rate, corrected for imbalance, was 21.4k / 23.9k / 20.9k at 2 / 4 / 8
+     threads (0.55x / 0.62x / 0.54x of solo).
+   - Controlled test with identical work per thread (mg4 depth 6, K independent sequential searches as K threads in
+     one process versus K separate processes, per-thread wall time): solo 28.7 s (thread) and 30.8 s (process);
+     K=2 73.9 s versus 37.5 s; K=4 68.0 s versus 54.5 s; K=8 114.4 s versus 60.5 s. Putting threads in one process
+     costs 1.97x / 1.25x / 1.89x on top of the hardware effect, and K=2 threads in one process finish less total work
+     per second (0.78x) than one thread. Separate processes reach 1.64x / 2.26x / 4.07x.
+   - `MallocNanoZone=0` did not change this consistently (mg4 depth 5: K=2 15.3 s to 12.7 s, K=4 12.0 s to 13.0 s,
+     solo 5.8 s), so the cause is not specific to the nano zone. Whether it is the allocator or how the scheduler
+     treats a multi-thread process is not established (hypothesis).
+4. **The hot path allocates heavily (read from the code, not profiled).** `Board::isInCheckAfterMove` copies the
+   whole Board, and the Board copy constructor clones every piece (up to 32 `new` and 32 `delete`). It runs for every
+   pseudo-legal candidate in `MoveExecutor::generateMoves` (every interior node) and again inside
+   `Game::performMove` (every make). `std::vector<Move>` is built per piece and per node, and captures clone the
+   captured piece. That is about 1,000 or more allocations per interior node, which is why the search runs at only
+   about 40k nodes per second.
+
+Verdict: node inflation (2.6x to 6.8x) is the dominant cause of the sub-linear and negative scaling; in-process
+slowdown (about 1.3x to 2x per thread) is second; imbalance is minor. Removing the in-process slowdown would mean
+removing Board copies from the hot path (a Board representation change), which is outside this task.
+
+### The fix
+
+`AlphaBeta::search`, threads > 1 path only (the threads <= 1 path is unchanged): root move 0 is searched alone with the
+full window to seed the best score, then workers take the remaining root moves from a shared atomic index and search
+each with a window narrowed by the best score so far. Earlier-index moves use a window one point wider, so exact ties
+are still detected and the earliest root move wins, matching the sequential search.
+
+Checks after the fix (node counts are not timings, so they are valid even though the later timings are not):
+
+- 1-thread node counts are unchanged: mg7 2,744,459 and mg4 1,407,833 at depth 6 as in C1, and op1, mg2 and eg5 equal
+  C1's depth-5 and depth-6 counts. C1 used 1 thread, so it is unaffected.
+- Best move and score are unchanged at 2, 4 and 8 threads: mg7 `43-21` -80, mg4 `64-74` -110.
+- Node inflation at depth 6 dropped from 2.60x to 1.04x (2 threads), 1.06x (4 threads) and 1.09x (8 threads) on mg7
+  (2,855,567 / 2,907,095 / 2,986,938 nodes), and from 6.84x to 2.51x at 8 threads on mg4 (3,528,930 nodes). Node
+  counts now vary slightly between runs because the window a root move gets depends on when other workers finish.
+- Tests: `ParallelSearchTest.MatchesSequentialMoveAndScore` compares move and score for 2, 4 and 8 threads against the
+  sequential search on five positions, one with tied root scores (two mating rook moves). All 129 tests pass, and
+  ThreadSanitizer reports no race in `ParallelSearchTest.*`.
+- Kiwipete was dropped from that test: its sequential reference search with quiescence takes over a minute even at
+  depth 2.
