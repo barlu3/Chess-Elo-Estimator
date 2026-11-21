@@ -8,20 +8,24 @@
 #include "search/header/alphabeta.h"
 #include "search/header/quiescence.h"
 #include "search/header/ordering.h"
+#include "eval/material.h"
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
-    if (depth == 0) return Quiescence::quiescence(game, history, alpha, beta, 1);
+    nodes++;
+    if (timeUp(nodes)) return 0;
+    if (depth == 0) return quiescence ? Quiescence::quiescence(game, history, alpha, beta, 1) : Evaluator::evaluate(game);
 
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
     if (moves.empty()) return game.getBoard().isInCheck(game.isWhiteTurn()) ? -100000 : 0;
 
-    MoveOrder::orderMoves(moves, game.getBoard());
+    if (ordering) MoveOrder::orderMoves(moves, game.getBoard());
     
     for (const Move& move : moves) {
         if (!MoveExecutor::make(move, game, history)) continue;
@@ -30,7 +34,7 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
         
         MoveExecutor::undo(game,history);
 
-        if (score >= beta) return beta;     //opponent wont allow this move
+        if (pruning && score >= beta) return beta;     //opponent wont allow this move
         if (score > alpha) alpha = score;   //next best move for player
     }
     return alpha;
@@ -39,9 +43,12 @@ long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long
 SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int threads) {
     static const long long INF = 1e18;
 
+    nodes = 0;
+    Quiescence::nodes = 0;
+
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
 
-    MoveOrder::orderMoves(moves, game.getBoard());
+    if (ordering) MoveOrder::orderMoves(moves, game.getBoard());
 
     SearchResult result;
     result.score = -INF;
@@ -66,6 +73,7 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
 
             MoveExecutor::undo(game, history);
 
+            if (stopped.load(std::memory_order_relaxed)) break;   //score is from an aborted subtree, keep only the root moves finished so far
             if (score > result.score) {
                 result.score = score;
                 result.bestMove = move;
@@ -73,28 +81,48 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
             if (score > alpha) alpha = score;
         }
 
+        result.mainNodes = nodes;
+        result.quiescenceNodes = Quiescence::nodes;
         return result;
     }
 
-    //Parallel root. Workers share no state: each copies the Game (Board deep-copies
-    //its pieces) and builds its own MoveHistory, so make/undo never races. Each
-    //searches a full window because the narrowing alpha cannot be shared safely.
-    //Workers intentionally do not catch exceptions: like the sequential path, this
-    //search treats allocation failure as fatal, so a throw here ends the process.
+    //Parallel root: move 0 is searched alone to seed the window, then workers take the rest
+    //dynamically with a window narrowed by the shared best score. Each worker copies the Game
+    //and builds its own MoveHistory, so make/undo never races.
+    //Workers do not catch exceptions: like the sequential path, allocation failure is fatal.
     std::mutex resultMutex;
     long long bestScore = -INF;
     size_t bestIndex = moves.size();
+    long long mainTotal = 0, quiescenceTotal = 0;
 
-    auto worker = [&](int workerId) {
-        for (size_t i = workerId; i < moves.size(); i += workerCount) {
+    if (MoveExecutor::make(moves[0], game, history)) {
+        bestScore = -alphabeta(game, history, depth - 1, -INF, INF);
+        MoveExecutor::undo(game, history);
+        bestIndex = 0;
+    }
+    mainTotal = nodes;
+    quiescenceTotal = Quiescence::nodes;
+
+    std::atomic<size_t> next{1};
+    auto worker = [&]() {
+        for (size_t i = next++; i < moves.size(); i = next++) {
             Game localGame = game;
             MoveHistory localHistory;
 
             if (!MoveExecutor::make(moves[i], localGame, localHistory)) continue;
 
-            long long score = -alphabeta(localGame, localHistory, depth - 1, -INF, INF);
+            long long lower;
+            {
+                std::lock_guard<std::mutex> lock(resultMutex);
+                //earlier-index moves search one point wider so an exact tie is detected and the earliest root move wins
+                lower = (i < bestIndex) ? bestScore - 1 : bestScore;
+            }
+
+            long long score = -alphabeta(localGame, localHistory, depth - 1, -INF, -lower);
 
             MoveExecutor::undo(localGame, localHistory);
+
+            if (score <= lower) continue;   //fail-hard bound at or below the window, not an exact score
 
             std::lock_guard<std::mutex> lock(resultMutex);
             //tie-break on the earliest root move so scheduling cannot change the answer
@@ -103,11 +131,15 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
                 bestIndex = i;
             }
         }
+
+        std::lock_guard<std::mutex> lock(resultMutex);
+        mainTotal += nodes;                 //each worker is a fresh thread, so its counters start at 0
+        quiescenceTotal += Quiescence::nodes;
     };
 
     std::vector<std::thread> pool;
     pool.reserve(workerCount);
-    for (int id = 0; id < workerCount; id++) pool.emplace_back(worker, id);
+    for (int id = 0; id < workerCount; id++) pool.emplace_back(worker);
     for (std::thread& t : pool) t.join();
 
     if (bestIndex < moves.size()) {
@@ -115,5 +147,7 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
         result.bestMove = moves[bestIndex];
     }
 
+    result.mainNodes = mainTotal;
+    result.quiescenceNodes = quiescenceTotal;
     return result;
 }

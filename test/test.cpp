@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <algorithm> 
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 
@@ -24,6 +25,8 @@
 #include "../engine/search/header/alphabeta.h"
 #include "../engine/search/header/ordering.h"
 #include "../engine/search/header/iterdeep.h"
+#include "../engine/search/header/epd.h"
+#include "../engine/search/MoveExecutor.h"
 
 #include "../src/header/api/sub/Pawn.h"
 #include "../src/header/api/sub/Rook.h"
@@ -1765,6 +1768,84 @@ TEST(IterDeepTest, DeterministicSimplePosition) {
     EXPECT_EQ(r1.score, r2.score)
         << "IterDeep is non-deterministic on identical simple positions";
 }
+
+static bool isLegalRootMove(const Game& game, const Move& m) {
+    for (const Move& c : MoveExecutor::generateMoves(game))
+        if (c.fromRow == m.fromRow && c.fromCol == m.fromCol && c.toRow == m.toRow && c.toCol == m.toCol) return true;
+    return false;
+}
+static const char* KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"; // very busy: one quiescence search takes seconds
+
+// The time limit is a hard deadline: a busy position must return close to the limit
+TEST(IterDeepTest, HardDeadlineStopsBusyMiddlegame) {
+    Game game;
+    MoveHistory history;
+    ASSERT_TRUE(game.loadFEN(KIWIPETE));
+
+    auto start = std::chrono::steady_clock::now();
+    SearchResult result = IterDeep::search(game, history, 50, 1, 8);
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+
+    EXPECT_LT(elapsedMs, 150);
+    EXPECT_TRUE(isLegalRootMove(game, result.bestMove));
+    EXPECT_EQ(history.moveHistoryVector.size(), 0u);
+}
+
+// Even when the first depth is cut off, the result must be a real legal move
+TEST(IterDeepTest, HardDeadlineNeverReturnsSentinel) {
+    for (int limit : {1, 5, 20}) {
+        Game seq, par;
+        MoveHistory h1, h2;
+        ASSERT_TRUE(seq.loadFEN(KIWIPETE));
+        ASSERT_TRUE(par.loadFEN(KIWIPETE));
+
+        SearchResult s = IterDeep::search(seq, h1, limit, 1, 8);
+        EXPECT_NE(s.bestMove.fromRow, -1) << "sequential, limit " << limit;
+        EXPECT_TRUE(isLegalRootMove(seq, s.bestMove)) << "sequential, limit " << limit;
+
+        SearchResult p = IterDeep::search(par, h2, limit, 1, 8, 4);
+        EXPECT_NE(p.bestMove.fromRow, -1) << "4 threads, limit " << limit;
+        EXPECT_TRUE(isLegalRootMove(par, p.bestMove)) << "4 threads, limit " << limit;
+    }
+}
+
+// An aborted search must not leave the engine's global state changed
+TEST(IterDeepTest, HardDeadlineLeavesNoStateBehind) {
+    Game g;
+    MoveHistory h;
+
+    SearchResult before = AlphaBeta::search(g, h, 2);
+
+    Game kiwi;
+    MoveHistory kh;
+    ASSERT_TRUE(kiwi.loadFEN(KIWIPETE));
+    IterDeep::search(kiwi, kh, 5, 1, 8);
+
+    SearchResult after = AlphaBeta::search(g, h, 2);
+
+    EXPECT_EQ(before.score, after.score);
+    EXPECT_EQ(before.mainNodes, after.mainNodes);
+    EXPECT_EQ(before.quiescenceNodes, after.quiescenceNodes);
+    EXPECT_FALSE(AlphaBeta::stopped.load());
+    EXPECT_TRUE(AlphaBeta::deadline == std::chrono::steady_clock::time_point::max());
+}
+
+// depth reports the last completed depth
+TEST(IterDeepTest, ReportsCompletedDepth) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 3, new Pawn(4, 3, true));
+    b.setPiece(3, 4, new Queen(3, 4, false));
+
+    Game g;
+    g.setBoard(b); g.setTurn(true);
+    MoveHistory h;
+
+    SearchResult result = IterDeep::search(g, h, 5000, 1, 3);
+    EXPECT_EQ(result.depth, 3);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PST TESTS — add these to test/test.cpp
 // Include at top: #include "../engine/eval/pst.h"
@@ -1872,11 +1953,46 @@ TEST(PSTTest, EvaluatorReflectsKnightImprovement) {
 // PARALLEL ROOT SEARCH TESTS
 // ─────────────────────────────────────────────
 // AlphaBeta::search and IterDeep::search take an opt-in thread count.
-// threads<=1 keeps the original sequential path; threads>1 splits the ROOT
-// moves across workers, each with its own Game copy and fresh MoveHistory.
-// Parallel workers cannot share the narrowing alpha, so the node counts differ
-// from the sequential search — but the returned score must still agree, and
-// ties must break deterministically on the earliest root move.
+// threads<=1 keeps the original sequential path; threads>1 seeds with root move 0,
+// then hands the remaining ROOT moves to workers dynamically, each with its own
+// Game copy, fresh MoveHistory and a window narrowed by the shared best score.
+// Node counts differ from the sequential search, but the returned move and score
+// must agree, and ties must break deterministically on the earliest root move.
+
+// Parallel search must return the sequential move and score for each thread count.
+static void expectSameAsSequential(const std::string& fen, int depth) {
+    Game ref;
+    ASSERT_TRUE(ref.loadFEN(fen)) << fen;
+    MoveHistory refHistory;
+    SearchResult expected = AlphaBeta::search(ref, refHistory, depth, 1);
+
+    for (int threads : {2, 4, 8}) {
+        Game game;
+        ASSERT_TRUE(game.loadFEN(fen)) << fen;
+        MoveHistory history;
+        SearchResult result = AlphaBeta::search(game, history, depth, threads);
+
+        std::string where = fen + " threads=" + std::to_string(threads);
+        EXPECT_EQ(result.score, expected.score) << where;
+        EXPECT_EQ(result.bestMove.fromRow, expected.bestMove.fromRow) << where;
+        EXPECT_EQ(result.bestMove.fromCol, expected.bestMove.fromCol) << where;
+        EXPECT_EQ(result.bestMove.toRow, expected.bestMove.toRow) << where;
+        EXPECT_EQ(result.bestMove.toCol, expected.bestMove.toCol) << where;
+    }
+}
+
+TEST(ParallelSearchTest, MatchesSequentialMoveAndScore) {
+    expectSameAsSequential("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 3);
+    expectSameAsSequential("r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4", 2);
+    expectSameAsSequential("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 3);
+    expectSameAsSequential("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R b KQ - 1 8", 2);
+    // Ra8# and Rb8# both mate: the earliest root move must win in both searches.
+    Game tie;
+    ASSERT_TRUE(tie.loadFEN("6k1/5ppp/8/8/8/8/8/RR4K1 w - - 0 1"));
+    MoveHistory tieHistory;
+    EXPECT_EQ(AlphaBeta::search(tie, tieHistory, 2, 1).score, 100000);
+    expectSameAsSequential("6k1/5ppp/8/8/8/8/8/RR4K1 w - - 0 1", 2);
+}
 
 // The parallel root must agree with the sequential root on score.
 TEST(ParallelSearchTest, ScoreMatchesSequentialAtDepth2) {
@@ -1999,4 +2115,331 @@ TEST(ParallelSearchTest, IterDeepParallelLeavesCallerStateIntact) {
         << "Black material changed after parallel IterDeep — state is leaking";
     EXPECT_EQ(history.moveHistoryVector.size(), sizeBefore);
     EXPECT_EQ(game.isWhiteTurn(), turnBefore);
+}
+
+// ─────────────────────────────────────────────
+// FEN LOADER AND SEARCH COUNTER TESTS
+// ─────────────────────────────────────────────
+
+// Counts the move tree to a fixed depth; each node counts itself plus its children.
+static long long countTree(Game& game, MoveHistory& history, int depth) {
+    if (depth == 0) return 1;
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
+    if (moves.empty()) return 1;
+    long long total = 1;
+    for (const Move& move : moves) {
+        if (!MoveExecutor::make(move, game, history)) continue;
+        total += countTree(game, history, depth - 1);
+        MoveExecutor::undo(game, history);
+    }
+    return total;
+}
+
+// Keeps only "placement side" so round-trips ignore castling, en passant and clocks.
+static std::string placementAndSide(const std::string& fen) {
+    size_t firstSpace = fen.find(' ');
+    size_t secondSpace = fen.find(' ', firstSpace + 1);
+    return fen.substr(0, secondSpace);
+}
+
+static bool hasMove(const std::vector<Move>& moves, int fr, int fc, int tr, int tc) {
+    for (const Move& m : moves) {
+        if (m.fromRow == fr && m.fromCol == fc && m.toRow == tr && m.toCol == tc) return true;
+    }
+    return false;
+}
+
+TEST(FenTest, RoundTripsPlacementAndSide) {
+    const std::vector<std::string> fens = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1",
+        "r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q1n2N2/PP3PPP/3R1K1R b - - 1 17",
+    };
+    for (const std::string& fen : fens) {
+        Game g;
+        ASSERT_TRUE(g.loadFEN(fen)) << fen;
+        EXPECT_EQ(placementAndSide(g.getBoard().toFEN(g.isWhiteTurn())), placementAndSide(fen)) << fen;
+    }
+}
+
+TEST(FenTest, StartFenMatchesDefaultGameTreeCount) {
+    Game a;
+    MoveHistory ha;
+    Game b;
+    MoveHistory hb;
+    ASSERT_TRUE(b.loadFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
+
+    long long countA = countTree(a, ha, 3);
+    long long countB = countTree(b, hb, 3);
+
+    EXPECT_EQ(countA, countB);
+    EXPECT_EQ(countA, 9323);
+}
+
+TEST(FenTest, NoCastlingWithoutRight) {
+    Game noKingside;
+    ASSERT_TRUE(noKingside.loadFEN("r3k2r/8/8/8/8/8/8/R3K2R w Qkq - 0 1"));
+    std::vector<Move> moves = MoveExecutor::generateMoves(noKingside);
+    EXPECT_FALSE(hasMove(moves, 7, 4, 7, 6)) << "kingside castle generated without the K right";
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 2));
+
+    Game withRights;
+    ASSERT_TRUE(withRights.loadFEN("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"));
+    moves = MoveExecutor::generateMoves(withRights);
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 6));
+    EXPECT_TRUE(hasMove(moves, 7, 4, 7, 2));
+}
+
+TEST(FenTest, EnPassantSquareProducesCapture) {
+    Game withEp;
+    MoveHistory history;
+    ASSERT_TRUE(withEp.loadFEN("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1"));
+    EXPECT_TRUE(hasMove(MoveExecutor::generateMoves(withEp), 3, 4, 2, 3));
+
+    Game withoutEp;
+    ASSERT_TRUE(withoutEp.loadFEN("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1"));
+    EXPECT_FALSE(hasMove(MoveExecutor::generateMoves(withoutEp), 3, 4, 2, 3));
+
+    EXPECT_TRUE(MoveExecutor::make(Move{3, 4, 2, 3}, withEp, history));
+    EXPECT_EQ(withEp.getBoard().getPiece(3, 3), nullptr);
+    EXPECT_NE(dynamic_cast<Pawn*>(withEp.getBoard().getPiece(2, 3)), nullptr);
+}
+
+TEST(FenTest, InvalidFenFailsAndLeavesGameUnchanged) {
+    const std::vector<std::string> invalid = {
+        "",
+        "x",
+        "8/8/8/8/8/8/8/8 w - -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN w KQkq -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR x KQkq -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkqX -",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e4",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e3",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR/8 w KQkq -",
+    };
+    for (const std::string& fen : invalid) {
+        Game g;
+        EXPECT_FALSE(g.loadFEN(fen)) << fen;
+        EXPECT_EQ(g.getBoard().toFEN(true), Game().getBoard().toFEN(true)) << fen;
+        EXPECT_TRUE(g.isWhiteTurn()) << fen;
+    }
+}
+
+TEST(NodeCountTest, PruningOffCountsFullTreeAcrossThreads) {
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+
+    Game g1, g2;
+    MoveHistory h1, h2;
+    SearchResult r1 = AlphaBeta::search(g1, h1, 3, 1);
+    SearchResult r2 = AlphaBeta::search(g2, h2, 3, 4);
+
+    EXPECT_EQ(r1.mainNodes, 9322);
+    EXPECT_EQ(r2.mainNodes, r1.mainNodes) << "worker node counts were not merged";
+    EXPECT_GT(r1.quiescenceNodes, 0);
+    EXPECT_EQ(r1.score, r2.score);
+
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
+
+TEST(NodeCountTest, DefaultsPruneAndKeepScore) {
+    Game gOn, gOff;
+    MoveHistory hOn, hOff;
+    SearchResult on = AlphaBeta::search(gOn, hOn, 3, 1);
+
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+    SearchResult off = AlphaBeta::search(gOff, hOff, 3, 1);
+
+    EXPECT_LT(on.mainNodes, off.mainNodes);
+    EXPECT_EQ(on.score, off.score);
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+}
+
+TEST(NodeCountTest, StaticEvalLeavesPruningOffCountsFullTree) {
+    const bool savedQuiescence = AlphaBeta::quiescence;
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::quiescence = false;
+    AlphaBeta::pruning = false;
+    AlphaBeta::ordering = false;
+
+    Game g;
+    MoveHistory h;
+    SearchResult r = AlphaBeta::search(g, h, 3, 1);
+
+    EXPECT_EQ(r.mainNodes, 9322);
+    EXPECT_EQ(r.quiescenceNodes, 0);
+
+    AlphaBeta::quiescence = savedQuiescence;
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
+
+TEST(NodeCountTest, StaticEvalLeavesAbAndMvvSameScore) {
+    const bool savedQuiescence = AlphaBeta::quiescence;
+    const bool savedPruning = AlphaBeta::pruning;
+    const bool savedOrdering = AlphaBeta::ordering;
+    AlphaBeta::quiescence = false;
+    AlphaBeta::pruning = true;
+
+    AlphaBeta::ordering = false;
+    Game gOff;
+    MoveHistory hOff;
+    SearchResult off = AlphaBeta::search(gOff, hOff, 3, 1);
+
+    AlphaBeta::ordering = true;
+    Game gOn;
+    MoveHistory hOn;
+    SearchResult on = AlphaBeta::search(gOn, hOn, 3, 1);
+
+    EXPECT_EQ(on.score, off.score);
+    EXPECT_LT(on.mainNodes, 9322);
+
+    AlphaBeta::quiescence = savedQuiescence;
+    AlphaBeta::pruning = savedPruning;
+    AlphaBeta::ordering = savedOrdering;
+}
+
+// EPD / SAN matcher TESTS
+
+static Epd::San san(const char* fen, const char* s, Move& m) {
+    Game g;
+    if (!g.loadFEN(fen)) return Epd::San::NoMatch;
+    return Epd::sanToMove(g, s, m);
+}
+
+static bool same(const Move& a, int fr, int fc, int tr, int tc) {
+    return a.fromRow == fr && a.fromCol == fc && a.toRow == tr && a.toCol == tc;
+}
+
+TEST(EpdTest, PlainMove) {
+    const char* start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(start, "e4", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 6, 4, 4, 4));
+
+    EXPECT_EQ(san(start, "Nf3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+
+    EXPECT_EQ(san(start, "Nf3+", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+
+    EXPECT_EQ(san(start, "Nf3!?", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+}
+
+TEST(EpdTest, Capture) {
+    const char* fen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
+    Move m{};
+    EXPECT_EQ(san(fen, "exd5", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 4, 4, 3, 3));
+
+    EXPECT_EQ(san(fen, "d5", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, Castling) {
+    const char* white = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(white, "O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 6));
+    EXPECT_EQ(san(white, "O-O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 2));
+
+    const char* black = "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1";
+    EXPECT_EQ(san(black, "O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 0, 4, 0, 6));
+    EXPECT_EQ(san(black, "O-O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 0, 4, 0, 2));
+}
+
+TEST(EpdTest, FileDisambiguation) {
+    const char* fen = "7k/8/8/8/8/8/8/R3R1K1 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "Rad1", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 0, 7, 3));
+    EXPECT_EQ(san(fen, "Red1", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 3));
+    EXPECT_EQ(san(fen, "Rd1", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, RankDisambiguation) {
+    const char* fen = "4k3/8/8/R7/8/8/8/R3K3 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "R5a3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 3, 0, 5, 0));
+    EXPECT_EQ(san(fen, "R1a3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 0, 5, 0));
+}
+
+TEST(EpdTest, QueenPromotion) {
+    const char* fen = "8/P6k/8/8/8/8/8/K7 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "a8=Q", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 1, 0, 0, 0));
+    EXPECT_EQ(san(fen, "a8=N", m), Epd::San::Underpromotion);
+}
+
+TEST(EpdTest, UnknownOrIllegalSan) {
+    const char* start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(start, "Qh5", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "e5", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "Zz9", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "Nf", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, ParsesEntries) {
+    EpdEntry e;
+    ASSERT_TRUE(Epd::parse("2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - bm Qg6; id \"WAC.001\";", e));
+    EXPECT_EQ(e.fen, "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - -");
+    EXPECT_EQ(e.id, "WAC.001");
+    EXPECT_EQ(e.bm, std::vector<std::string>({"Qg6"}));
+    EXPECT_TRUE(e.am.empty());
+
+    ASSERT_TRUE(Epd::parse("8/1p6/p5R1/k7/Prpp4/K7/1NP5/8 w - - am Rd6; bm Rb6 Rg5+; id \"WAC.274\";", e));
+    EXPECT_EQ(e.am, std::vector<std::string>({"Rd6"}));
+    EXPECT_EQ(e.bm, std::vector<std::string>({"Rb6", "Rg5+"}));
+    EXPECT_EQ(e.id, "WAC.274");
+
+    EXPECT_FALSE(Epd::parse("1 2 3", e));
+
+    ASSERT_TRUE(Epd::parse("r3r1k1/5p2/pQ1b2pB/1p6/4p3/6P1/Pq2BP1P/2R3K1 b - - bm Ba3 Be5; c0 \"All win but e3 is best.\"; id \"WAC.150\";", e));
+    EXPECT_EQ(e.bm.size(), 2u);
+    EXPECT_EQ(e.id, "WAC.150");
+}
+
+TEST(EpdTest, EveryWacBestMoveResolves) {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / ".." / "engine" / "benchmark" / "wac.epd");
+    ASSERT_TRUE(in.is_open());
+
+    std::string line;
+    int count = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        count++;
+
+        EpdEntry e;
+        ASSERT_TRUE(Epd::parse(line, e)) << line;
+        Game g;
+        ASSERT_TRUE(g.loadFEN(e.fen)) << e.id;
+
+        for (const std::string& s : e.bm) {
+            Move m{};
+            EXPECT_EQ(Epd::sanToMove(g, s, m), Epd::San::Ok) << e.id << " bm " << s;
+        }
+        for (const std::string& s : e.am) {
+            Move m{};
+            EXPECT_EQ(Epd::sanToMove(g, s, m), Epd::San::Ok) << e.id << " am " << s;
+        }
+    }
+    EXPECT_EQ(count, 300);
 }

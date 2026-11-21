@@ -82,6 +82,14 @@ class Game {
         void setTurn(bool turn) {
             whiteTurn = turn;
         }
+
+        //loads a FEN into this game; returns false and leaves the game unchanged if the FEN is malformed
+        bool loadFEN(const std::string& fen) {
+            bool white;
+            if (!board.loadFEN(fen, white)) return false;
+            whiteTurn = white;
+            return true;
+        }
 };
 
 

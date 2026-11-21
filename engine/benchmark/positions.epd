@@ -1,0 +1,23 @@
+# C1 benchmark positions: 6 opening, 7 middlegame, 7 endgame.
+# Format: <FEN> ; <id> ; <category> ; <source/name>   (lines starting with # are ignored)
+# The engine promotes only to a queen, so perft positions 4 and 5 differ from standard perft counts.
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ; op1 ; opening ; Start position (perft position 1)
+rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1 ; op2 ; opening ; After 1.e4, en passant square set
+r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3 ; op3 ; opening ; Ruy Lopez after 3.Bb5
+r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4 ; op4 ; opening ; Giuoco Piano after 3...Bc5
+rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6 ; op5 ; opening ; Sicilian Najdorf after 5...a6
+rnbqkb1r/ppp2ppp/4pn2/3p4/2PP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4 ; op6 ; opening ; Queen's Gambit Declined after 3...Nf6
+r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ; mg1 ; middlegame ; Kiwipete (perft position 2)
+r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1 ; mg2 ; middlegame ; Perft position 4
+rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8 ; mg3 ; middlegame ; Perft position 5
+r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10 ; mg4 ; middlegame ; Perft position 6
+r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q1n2N2/PP3PPP/3R1K1R b - - 1 17 ; mg5 ; middlegame ; Byrne-Fischer 1956, before 17...Be6
+4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 1 16 ; mg6 ; middlegame ; Morphy, Opera Game 1858, before 16.Qb8+
+r1b2rk1/2q1b1pp/p2ppn2/1p6/3QP3/1BN1B3/PPP3PP/R4RK1 w - - 0 1 ; mg7 ; middlegame ; Bratko-Kopec BK.05
+8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1 ; eg1 ; endgame ; Perft position 3 (rook ending)
+1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1 ; eg2 ; endgame ; Lucena position
+7K/8/k1P5/7p/8/8/8/8 w - - 0 1 ; eg3 ; endgame ; Reti endgame study 1921
+8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - - 0 1 ; eg4 ; endgame ; Fine #70 (Lasker-Reichhelm)
+2r3k1/pppR1pp1/4p3/4P1P1/5P2/1P4K1/P1P5/8 w - - 0 1 ; eg5 ; endgame ; Bratko-Kopec BK.06
+4b3/p3kp2/6p1/3pP2p/2pP1P2/4K1P1/P3N2P/8 w - - 0 1 ; eg6 ; endgame ; Bratko-Kopec BK.08
+8/7p/5k2/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - - 0 1 ; eg7 ; endgame ; Win at Chess WAC.002

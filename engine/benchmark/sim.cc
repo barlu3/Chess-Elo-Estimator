@@ -1,0 +1,443 @@
+#include "Game.h"
+#include "api/moveHistory.h"
+#include "search/MoveExecutor.h"
+#include "search/header/alphabeta.h"
+#include "search/header/ordering.h"
+#include "search/header/iterdeep.h"
+#include "search/header/epd.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <thread>
+#include <vector>
+
+#define CHECK(cond) do { if (!(cond)) { std::fprintf(stderr, "CHECK failed: %s (%s:%d)\n", #cond, __FILE__, __LINE__); std::exit(1); } } while (0)
+
+struct Position { std::string id, category, name; Game game; };
+
+static std::string trim(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r");
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(" \t\r") - b + 1);
+}
+
+static std::vector<Position> loadPositions(const std::string& path) {
+    std::ifstream in(path);
+    CHECK(in.is_open());
+    std::vector<Position> positions;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (trim(line).empty() || trim(line)[0] == '#') continue;
+
+        std::vector<std::string> fields;
+        size_t start = 0, semi;
+        while ((semi = line.find(';', start)) != std::string::npos) {
+            fields.push_back(trim(line.substr(start, semi - start)));
+            start = semi + 1;
+        }
+        fields.push_back(trim(line.substr(start)));
+        CHECK(fields.size() == 4);
+
+        Position p;
+        p.id = fields[1];
+        p.category = fields[2];
+        p.name = fields[3];
+
+        bool loaded = p.game.loadFEN(fields[0]);
+        if (!loaded) std::fprintf(stderr, "bad FEN for id %s\n", p.id.c_str());
+        CHECK(loaded);
+
+        std::vector<Move> moves = MoveExecutor::generateMoves(p.game);
+        if (moves.empty()) std::fprintf(stderr, "no legal moves for id %s\n", p.id.c_str());
+        CHECK(!moves.empty());
+
+        positions.push_back(p);
+    }
+    return positions;
+}
+
+static const Position& findPosition(const std::vector<Position>& positions, const std::string& id) {
+    const Position* found = nullptr;
+    for (const Position& p : positions) {
+        if (p.id == id) { found = &p; break; }
+    }
+    CHECK(found != nullptr);
+    return *found;
+}
+
+// Counts the nodes a full-width search visits, with no evaluation.
+static long long treeCount(Game& game, MoveHistory& history, int depth) {
+    if (depth == 0) return 1;
+    std::vector<Move> moves = MoveExecutor::generateMoves(game);
+    if (moves.empty()) return 1;
+    long long count = 1;
+    for (const Move& move : moves) {
+        if (!MoveExecutor::make(move, game, history)) continue;
+        count += treeCount(game, history, depth - 1);
+        MoveExecutor::undo(game, history);
+    }
+    return count;
+}
+
+// Number of alphabeta() calls a pruning-off AlphaBeta::search(root, depth) makes.
+static long long negamaxNodes(const Game& root, int depth) {
+    std::vector<Move> rootMoves = MoveExecutor::generateMoves(root);
+
+    unsigned int hw = std::thread::hardware_concurrency();
+    size_t workers = hw == 0 ? 1 : hw;
+    if (workers > rootMoves.size()) workers = rootMoves.size();
+
+    std::atomic<size_t> next{0};
+    std::atomic<long long> total{0};
+    std::vector<std::thread> pool;
+    for (size_t w = 0; w < workers; w++) {
+        pool.emplace_back([&]() {
+            Game localGame = root;
+            MoveHistory history;
+            long long local = 0;
+            for (size_t i = next++; i < rootMoves.size(); i = next++) {
+                if (!MoveExecutor::make(rootMoves[i], localGame, history)) continue;
+                local += treeCount(localGame, history, depth - 1);
+                MoveExecutor::undo(localGame, history);
+            }
+            total += local;
+        });
+    }
+    for (std::thread& t : pool) t.join();
+    return total.load();
+}
+
+static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool ordering, double& ms, int threads = 1) {
+    Game g = game;
+    MoveHistory history;
+    AlphaBeta::pruning = pruning;
+    AlphaBeta::ordering = ordering;
+    AlphaBeta::quiescence = false; // C1 compares main-search nodes with static-eval leaves
+
+    auto start = std::chrono::steady_clock::now();
+    SearchResult result = AlphaBeta::search(g, history, depth, threads);
+    ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = true;
+    return result;
+}
+
+static void printBuildInfo() {
+    std::printf("compiler: %s\n", __VERSION__);
+    std::printf("flags: %s\n", BENCH_FLAGS);
+    std::printf("build type: %s\n", BENCH_BUILD_TYPE_NAME);
+    std::printf("hardware_concurrency: %u\n", std::thread::hardware_concurrency());
+#ifndef NDEBUG
+    std::printf("WARNING: NDEBUG not defined, this is not a Release build; timings are meaningless\n");
+#endif
+    std::fflush(stdout);
+}
+
+static void printSearch(const char* label, const Game& game, int depth, bool ordering) {
+    double ms = 0;
+    SearchResult r = timedSearch(game, depth, true, ordering, ms);
+    std::printf("%s d%d main=%lld score=%lld s=%.2f\n", label, depth,
+                r.mainNodes, r.score, ms / 1000.0);
+    std::fflush(stdout);
+}
+
+static int probe(const std::string& path, const std::string& id) {
+    printBuildInfo();
+    std::vector<Position> positions = loadPositions(path);
+    const Game& game = findPosition(positions, id).game;
+
+    printSearch("mvv", game, 5, true);
+    printSearch("ab", game, 5, false);
+    printSearch("mvv", game, 6, true);
+    printSearch("ab", game, 6, false);
+
+    auto start = std::chrono::steady_clock::now();
+    long long nodes = negamaxNodes(game, 5);
+    double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("negamax d5 nodes=%lld s=%.2f\n", nodes, s);
+    std::fflush(stdout);
+    return 0;
+}
+
+static int timeRun(const std::string& path, const std::string& id, int depth, int threads) {
+    CHECK(depth >= 1 && threads >= 1);
+    std::vector<Position> positions = loadPositions(path);
+    const Game& game = findPosition(positions, id).game;
+
+    // Mirrors the worker clamp in AlphaBeta::search; keep in sync.
+    size_t hw = std::thread::hardware_concurrency();
+    size_t workers = std::min({(size_t)threads, hw == 0 ? 1 : hw, MoveExecutor::generateMoves(game).size()});
+
+    double ms = 0;
+    SearchResult r = timedSearch(game, depth, true, true, ms, threads);
+    std::printf("%s,%d,%zu,%d,%lld,%.3f,%d%d-%d%d,%lld\n", id.c_str(), threads, workers, depth, r.mainNodes, ms,
+                r.bestMove.fromRow, r.bestMove.fromCol, r.bestMove.toRow, r.bestMove.toCol, r.score);
+    std::fflush(stdout);
+    return 0;
+}
+
+// Full-window subtree size per ordered root move, for load-imbalance analysis.
+static int splitRun(const std::string& path, const std::string& id, int depth) {
+    CHECK(depth >= 1);
+    std::vector<Position> positions = loadPositions(path);
+    const Game& game = findPosition(positions, id).game;
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = false;
+
+    Game g = game;
+    MoveHistory history;
+    std::vector<Move> moves = MoveExecutor::generateMoves(g);
+    MoveOrder::orderMoves(moves, g.getBoard());
+    const long long INF = static_cast<long long>(1e18);
+    for (size_t i = 0; i < moves.size(); i++) {
+        if (!MoveExecutor::make(moves[i], g, history)) continue;
+        AlphaBeta::nodes = 0;
+        AlphaBeta::alphabeta(g, history, depth - 1, -INF, INF);
+        MoveExecutor::undo(g, history);
+        std::printf("%s,%zu,%lld\n", id.c_str(), i, AlphaBeta::nodes);
+    }
+    std::fflush(stdout);
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = true;
+    return 0;
+}
+
+struct Row {
+    std::string id, category;
+    long long neg5, ab5Main, mvv5Main, score5Ab, score5Mvv;
+    double ab5Ms, mvv5Ms;
+    long long mvv6Main;
+    double mvv6Ms;
+};
+
+// Pruning-off search must visit the same tree as the node-only count; pruning and ordering must not change the score.
+static void identityCheck(const Position& p, int depth, int& mismatches) {
+    double ms = 0;
+    SearchResult off = timedSearch(p.game, depth, false, false, ms);
+    CHECK(off.mainNodes == negamaxNodes(p.game, depth));
+    SearchResult ab = timedSearch(p.game, depth, true, false, ms);
+    SearchResult mvv = timedSearch(p.game, depth, true, true, ms);
+    if (ab.score != off.score || mvv.score != off.score) {
+        std::fprintf(stderr, "SCORE MISMATCH id=%s depth=%d off=%lld ab=%lld mvv=%lld\n", p.id.c_str(), depth,
+                     off.score, ab.score, mvv.score);
+        mismatches++;
+    }
+}
+
+static double savedPct(long long nodes, long long negamax) {
+    return 100.0 * (1.0 - double(nodes) / double(negamax));
+}
+
+static void printAggregate(const char* mode, const std::vector<Row>& rows, bool mvv) {
+    std::vector<double> pct;
+    long long sumMain = 0, sumNeg = 0;
+    for (const Row& r : rows) {
+        long long main = mvv ? r.mvv5Main : r.ab5Main;
+        pct.push_back(savedPct(main, r.neg5));
+        sumMain += main;
+        sumNeg += r.neg5;
+    }
+    std::sort(pct.begin(), pct.end());
+    size_t n = pct.size();
+    double median = n % 2 ? pct[n / 2] : (pct[n / 2 - 1] + pct[n / 2]) / 2.0;
+    std::printf("%s: median per-position %% saved = %.2f, pooled %% saved (1 - sum nodes / sum negamax) = %.2f, "
+                "min = %.2f, max = %.2f\n", mode, median, savedPct(sumMain, sumNeg), pct.front(), pct.back());
+}
+
+static int run(const std::string& epdPath, const std::string& csvPath) {
+    printBuildInfo();
+    std::vector<Position> positions = loadPositions(epdPath);
+    CHECK(!positions.empty());
+
+    int mismatches = 0, depth3Count = 0, depth4Count = 0;
+    for (const Position& p : positions) {
+        identityCheck(p, 3, mismatches);
+        depth3Count++;
+        bool deep = p.id == "op1" || p.id == "mg6" || p.id == "eg2" || p.id == "eg3" || p.id == "eg4";
+        if (deep) {
+            identityCheck(p, 4, mismatches);
+            depth4Count++;
+        }
+        std::printf("identity id=%s\n", p.id.c_str());
+        std::fflush(stdout);
+    }
+    CHECK(depth4Count >= 3);
+    std::printf("identity check: main-node counts equal the node-only tree count on %d positions at depth 3 and %d at depth 4\n",
+                depth3Count, depth4Count);
+
+    std::ofstream csv(csvPath);
+    CHECK(csv.is_open());
+    csv << std::fixed << std::setprecision(3);
+    csv << "id,category,negamax5,ab5_main,ab5_ms,mvv5_main,mvv5_ms,score5_ab,score5_mvv,mvv6_main,mvv6_ms\n";
+    csv.flush();
+
+    std::vector<Row> rows;
+    for (size_t i = 0; i < positions.size(); i++) {
+        const Position& p = positions[i];
+        Row r;
+        r.id = p.id;
+        r.category = p.category;
+        r.neg5 = negamaxNodes(p.game, 5);
+
+        SearchResult ab5 = timedSearch(p.game, 5, true, false, r.ab5Ms);
+        SearchResult mvv5 = timedSearch(p.game, 5, true, true, r.mvv5Ms);
+        // Node counts are deterministic; a repeat on 3 positions is enough to show it.
+        if (i < 3) {
+            double repeatMs = 0;
+            SearchResult again = timedSearch(p.game, 5, true, true, repeatMs);
+            CHECK(again.mainNodes == mvv5.mainNodes && again.score == mvv5.score);
+        }
+        if (ab5.score != mvv5.score) {
+            std::fprintf(stderr, "ROOT SCORE MISMATCH id=%s ab=%lld mvv=%lld\n", p.id.c_str(), ab5.score, mvv5.score);
+            mismatches++;
+        }
+
+        r.ab5Main = ab5.mainNodes;
+        r.score5Ab = ab5.score;
+        r.mvv5Main = mvv5.mainNodes;
+        r.score5Mvv = mvv5.score;
+        // ab at depth 6 is omitted: it takes up to 22 minutes per position.
+        SearchResult mvv6 = timedSearch(p.game, 6, true, true, r.mvv6Ms);
+        r.mvv6Main = mvv6.mainNodes;
+
+        std::printf("%s neg5=%lld ab5_main=%lld mvv5_main=%lld\n", r.id.c_str(), r.neg5, r.ab5Main, r.mvv5Main);
+        std::fflush(stdout);
+
+        csv << r.id << ',' << r.category << ',' << r.neg5 << ',' << r.ab5Main << ',' << r.ab5Ms << ','
+            << r.mvv5Main << ',' << r.mvv5Ms << ',' << r.score5Ab << ',' << r.score5Mvv << ','
+            << r.mvv6Main << ',' << r.mvv6Ms << '\n';
+        csv.flush();
+        rows.push_back(r);
+    }
+
+    std::printf("\nMain-search nodes, fixed depth 5, static-eval leaves (quiescence off in all modes)\n");
+    std::printf("Depth 6 column: ab+mvvlva only; ab at depth 6 omitted (up to 22 min per position).\n");
+    std::printf("| id | category | negamax | ab | ab+mvvlva | %% saved ab | %% saved ab+mvvlva | d6 ab+mvvlva |\n");
+    std::printf("|---|---|---|---|---|---|---|---|\n");
+    for (const Row& r : rows) {
+        std::printf("| %s | %s | %lld | %lld | %lld | %.2f | %.2f | %lld |\n", r.id.c_str(), r.category.c_str(), r.neg5,
+                    r.ab5Main, r.mvv5Main, savedPct(r.ab5Main, r.neg5), savedPct(r.mvv5Main, r.neg5), r.mvv6Main);
+    }
+    std::printf("\n");
+    printAggregate("ab", rows, false);
+    printAggregate("ab+mvvlva", rows, true);
+    std::printf("mismatches: %d\n", mismatches);
+    return mismatches == 0 ? 0 : 1;
+}
+
+static double median(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    size_t n = v.size();
+    return n % 2 ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
+}
+
+// Scores the Win At Chess suite: one IterDeep search per position, stopped only by the clock.
+static int wac(const std::string& epdPath, int ms, const std::string& csvPath) {
+    CHECK(ms >= 1);
+    printBuildInfo();
+    std::ifstream in(epdPath);
+    CHECK(in.is_open());
+    std::ofstream csv(csvPath);
+    CHECK(csv.is_open());
+    csv << std::fixed << std::setprecision(1);
+    csv << "id,solved,engine_move,bm,depth,nodes,ms,note\n";
+    csv.flush();
+
+    int solvedCount = 0, zeroDepth = 0;
+    std::vector<double> depths, times;
+    std::vector<std::pair<std::string, std::string>> notes;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty()) continue;
+
+        EpdEntry e;
+        CHECK(Epd::parse(line, e));
+        Game game;
+        bool loaded = game.loadFEN(e.fen);
+        if (!loaded) std::fprintf(stderr, "bad FEN for id %s\n", e.id.c_str());
+        CHECK(loaded);
+
+        std::vector<Move> best, avoid;
+        std::string note;
+        auto resolve = [&](const std::vector<std::string>& sans, std::vector<Move>& out, const std::string& prefix) {
+            for (const std::string& san : sans) {
+                Move mv{};
+                switch (Epd::sanToMove(game, san, mv)) {
+                    case Epd::San::Ok: out.push_back(mv); break;
+                    case Epd::San::Underpromotion: note += prefix + "underpromotion:" + san + " "; break;
+                    case Epd::San::NoMatch: note += prefix + "unresolved:" + san + " "; break;
+                }
+            }
+        };
+        resolve(e.bm, best, "");
+        resolve(e.am, avoid, "am-");
+        if (!e.bm.empty() && best.empty()) note = "unsolvable " + note;
+        note = trim(note);
+
+        Game g = game;
+        MoveHistory history;
+        auto start = std::chrono::steady_clock::now();
+        // maxDepth 64: the clock, not the default depth cap, must end the search; threads 1, AlphaBeta switches are all left at their default (on)
+        SearchResult r = IterDeep::search(g, history, ms, 1, 64, 1);
+        double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+
+        const Move& engine = r.bestMove;
+        auto same = [&](const Move& m) {
+            return m.fromRow == engine.fromRow && m.fromCol == engine.fromCol && m.toRow == engine.toRow && m.toCol == engine.toCol;
+        };
+        bool hit = e.bm.empty() || std::any_of(best.begin(), best.end(), same);
+        bool solved = hit && std::none_of(avoid.begin(), avoid.end(), same);
+        std::string engineMove = {char('a' + engine.fromCol), char('0' + 8 - engine.fromRow),
+                                  char('a' + engine.toCol), char('0' + 8 - engine.toRow)};
+        std::string bmText;
+        for (size_t i = 0; i < e.bm.size(); i++) bmText += (i ? " " : "") + e.bm[i];
+        long long nodes = r.mainNodes + r.quiescenceNodes;
+
+        csv << e.id << ',' << (solved ? 1 : 0) << ',' << engineMove << ',' << bmText << ',' << r.depth << ','
+            << nodes << ',' << elapsed << ',' << note << '\n';
+        csv.flush();
+        std::printf("%s solved=%d\n", e.id.c_str(), solved ? 1 : 0);
+        std::fflush(stdout);
+
+        solvedCount += solved ? 1 : 0;
+        if (r.depth == 0) zeroDepth++;
+        depths.push_back(r.depth);
+        times.push_back(elapsed);
+        if (!note.empty()) notes.push_back({e.id, note});
+    }
+    CHECK(!times.empty());
+
+    int n = (int)times.size();
+    std::printf("wac %d ms: solved %d/%d (%.1f%%)\n", ms, solvedCount, n, 100.0 * solvedCount / n);
+    std::printf("median completed depth: %.1f, positions with depth 0 (first depth cut off): %d\n", median(depths), zeroDepth);
+    std::printf("time per move: median %.1f ms, max %.1f ms\n", median(times), *std::max_element(times.begin(), times.end()));
+    for (const auto& entry : notes) std::printf("note: %s %s\n", entry.first.c_str(), entry.second.c_str());
+    std::fflush(stdout);
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    std::string cmd = argc > 1 ? argv[1] : "";
+    if (cmd == "probe" && argc == 4) return probe(argv[2], argv[3]);
+    if (cmd == "run" && argc == 4) return run(argv[2], argv[3]);
+    if (cmd == "time" && argc == 6) return timeRun(argv[2], argv[3], std::atoi(argv[4]), std::atoi(argv[5]));
+    if (cmd == "split" && argc == 5) return splitRun(argv[2], argv[3], std::atoi(argv[4]));
+    if (cmd == "wac" && argc == 5) return wac(argv[2], std::atoi(argv[3]), argv[4]);
+    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n"
+                         "       bench time <epd> <id> <depth> <threads>\n       bench split <epd> <id> <depth>\n"
+                         "       bench wac <epd> <ms> <csv>\n");
+    return 1;
+}

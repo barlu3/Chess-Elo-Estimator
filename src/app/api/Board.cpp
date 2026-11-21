@@ -7,6 +7,7 @@
 #include "api/sub/King.h"
 #include "api/sub/Bishop.h"
 #include <iostream>
+#include <sstream>
 #include <string>
 
 using namespace std;
@@ -312,4 +313,94 @@ std::string Board::toFEN(bool white) const {
     fen += "- - 0 1";
 
     return fen;
+}
+
+bool Board::loadFEN(const std::string& fen, bool& isWhite) {
+    istringstream in(fen);
+    string placement, side, castling, ep;
+    if (!(in >> placement >> side >> castling >> ep)) return false;
+
+    if (side != "w" && side != "b") return false;
+    if (castling != "-" && castling.find_first_not_of("KQkq") != string::npos) return false;
+    if (ep != "-" && (ep.size() != 2 || ep[0] < 'a' || ep[0] > 'h' || (ep[1] != '3' && ep[1] != '6'))) return false;
+
+    //built aside so a malformed FEN never touches this board
+    Piece* next[8][8] = {};
+    auto fail = [&]() {
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                delete next[r][c];
+            }
+        }
+        return false;
+    };
+
+    const string pieceChars = "PNBRQKpnbrqk";
+    int row = 0, col = 0;
+    for (char ch : placement) {
+        if (ch == '/') {
+            if (col != 8 || row >= 7) return fail();
+            row++;
+            col = 0;
+        } else if (ch >= '1' && ch <= '8') {
+            col += ch - '0';
+            if (col > 8) return fail();
+        } else {
+            size_t idx = pieceChars.find(ch);
+            if (idx == string::npos || col >= 8) return fail();
+            bool white = idx < 6;
+            Piece* p = nullptr;
+            switch (idx % 6) {
+                case 0: p = new Pawn(row, col, white); break;
+                case 1: p = new Knight(row, col, white); break;
+                case 2: p = new Bishop(row, col, white); break;
+                case 3: p = new Rook(row, col, white); break;
+                case 4: p = new Queen(row, col, white); break;
+                default: p = new King(row, col, white); break;
+            }
+            next[row][col] = p;
+            col++;
+        }
+    }
+    if (row != 7 || col != 8) return fail();
+
+    //engine castling reads only the moved flags and corner squares, so a king or rook without its right must be marked moved
+    auto has = [&](char right) { return castling.find(right) != string::npos; };
+    int whiteKings = 0, blackKings = 0;
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (next[r][c] == nullptr) continue;
+            char s = next[r][c]->symbol();
+            if (s == 'K') whiteKings++;
+            if (s == 'k') blackKings++;
+            if (s != 'K' && s != 'k' && s != 'R' && s != 'r') continue;
+
+            bool keeps =
+                (s == 'K' && r == 7 && c == 4 && (has('K') || has('Q'))) ||
+                (s == 'k' && r == 0 && c == 4 && (has('k') || has('q'))) ||
+                (s == 'R' && r == 7 && c == 7 && has('K')) ||
+                (s == 'R' && r == 7 && c == 0 && has('Q')) ||
+                (s == 'r' && r == 0 && c == 7 && has('k')) ||
+                (s == 'r' && r == 0 && c == 0 && has('q'));
+            if (!keeps) next[r][c]->setMoved();
+        }
+    }
+    if (whiteKings != 1 || blackKings != 1) return fail();
+
+    if (ep != "-") {
+        int epCol = ep[0] - 'a';
+        bool whiteDoubled = ep[1] == '3';
+        Piece* pawn = next[whiteDoubled ? 4 : 3][epCol];
+        if (pawn == nullptr || pawn->symbol() != (whiteDoubled ? 'P' : 'p')) return fail();
+        pawn->setEnPassant(true);
+    }
+
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            removePiece(r, c);
+            board[r][c] = next[r][c];
+        }
+    }
+    isWhite = (side == "w");
+    return true;
 }
