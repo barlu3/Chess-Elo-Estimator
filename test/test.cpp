@@ -25,6 +25,7 @@
 #include "../engine/search/header/alphabeta.h"
 #include "../engine/search/header/ordering.h"
 #include "../engine/search/header/iterdeep.h"
+#include "../engine/search/header/epd.h"
 #include "../engine/search/MoveExecutor.h"
 
 #include "../src/header/api/sub/Pawn.h"
@@ -2305,4 +2306,140 @@ TEST(NodeCountTest, StaticEvalLeavesAbAndMvvSameScore) {
     AlphaBeta::quiescence = savedQuiescence;
     AlphaBeta::pruning = savedPruning;
     AlphaBeta::ordering = savedOrdering;
+}
+
+// EPD / SAN matcher TESTS
+
+static Epd::San san(const char* fen, const char* s, Move& m) {
+    Game g;
+    if (!g.loadFEN(fen)) return Epd::San::NoMatch;
+    return Epd::sanToMove(g, s, m);
+}
+
+static bool same(const Move& a, int fr, int fc, int tr, int tc) {
+    return a.fromRow == fr && a.fromCol == fc && a.toRow == tr && a.toCol == tc;
+}
+
+TEST(EpdTest, PlainMove) {
+    const char* start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(start, "e4", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 6, 4, 4, 4));
+
+    EXPECT_EQ(san(start, "Nf3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+
+    EXPECT_EQ(san(start, "Nf3+", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+
+    EXPECT_EQ(san(start, "Nf3!?", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 6, 5, 5));
+}
+
+TEST(EpdTest, Capture) {
+    const char* fen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
+    Move m{};
+    EXPECT_EQ(san(fen, "exd5", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 4, 4, 3, 3));
+
+    EXPECT_EQ(san(fen, "d5", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, Castling) {
+    const char* white = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(white, "O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 6));
+    EXPECT_EQ(san(white, "O-O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 2));
+
+    const char* black = "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1";
+    EXPECT_EQ(san(black, "O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 0, 4, 0, 6));
+    EXPECT_EQ(san(black, "O-O-O", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 0, 4, 0, 2));
+}
+
+TEST(EpdTest, FileDisambiguation) {
+    const char* fen = "7k/8/8/8/8/8/8/R3R1K1 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "Rad1", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 0, 7, 3));
+    EXPECT_EQ(san(fen, "Red1", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 4, 7, 3));
+    EXPECT_EQ(san(fen, "Rd1", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, RankDisambiguation) {
+    const char* fen = "4k3/8/8/R7/8/8/8/R3K3 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "R5a3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 3, 0, 5, 0));
+    EXPECT_EQ(san(fen, "R1a3", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 7, 0, 5, 0));
+}
+
+TEST(EpdTest, QueenPromotion) {
+    const char* fen = "8/P6k/8/8/8/8/8/K7 w - - 0 1";
+    Move m{};
+    EXPECT_EQ(san(fen, "a8=Q", m), Epd::San::Ok);
+    EXPECT_TRUE(same(m, 1, 0, 0, 0));
+    EXPECT_EQ(san(fen, "a8=N", m), Epd::San::Underpromotion);
+}
+
+TEST(EpdTest, UnknownOrIllegalSan) {
+    const char* start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    Move m{};
+    EXPECT_EQ(san(start, "Qh5", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "e5", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "Zz9", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "", m), Epd::San::NoMatch);
+    EXPECT_EQ(san(start, "Nf", m), Epd::San::NoMatch);
+}
+
+TEST(EpdTest, ParsesEntries) {
+    EpdEntry e;
+    ASSERT_TRUE(Epd::parse("2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - bm Qg6; id \"WAC.001\";", e));
+    EXPECT_EQ(e.fen, "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - -");
+    EXPECT_EQ(e.id, "WAC.001");
+    EXPECT_EQ(e.bm, std::vector<std::string>({"Qg6"}));
+    EXPECT_TRUE(e.am.empty());
+
+    ASSERT_TRUE(Epd::parse("8/1p6/p5R1/k7/Prpp4/K7/1NP5/8 w - - am Rd6; bm Rb6 Rg5+; id \"WAC.274\";", e));
+    EXPECT_EQ(e.am, std::vector<std::string>({"Rd6"}));
+    EXPECT_EQ(e.bm, std::vector<std::string>({"Rb6", "Rg5+"}));
+    EXPECT_EQ(e.id, "WAC.274");
+
+    EXPECT_FALSE(Epd::parse("1 2 3", e));
+
+    ASSERT_TRUE(Epd::parse("r3r1k1/5p2/pQ1b2pB/1p6/4p3/6P1/Pq2BP1P/2R3K1 b - - bm Ba3 Be5; c0 \"All win but e3 is best.\"; id \"WAC.150\";", e));
+    EXPECT_EQ(e.bm.size(), 2u);
+    EXPECT_EQ(e.id, "WAC.150");
+}
+
+TEST(EpdTest, EveryWacBestMoveResolves) {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / ".." / "engine" / "benchmark" / "wac.epd");
+    ASSERT_TRUE(in.is_open());
+
+    std::string line;
+    int count = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        count++;
+
+        EpdEntry e;
+        ASSERT_TRUE(Epd::parse(line, e)) << line;
+        Game g;
+        ASSERT_TRUE(g.loadFEN(e.fen)) << e.id;
+
+        for (const std::string& s : e.bm) {
+            Move m{};
+            EXPECT_EQ(Epd::sanToMove(g, s, m), Epd::San::Ok) << e.id << " bm " << s;
+        }
+        for (const std::string& s : e.am) {
+            Move m{};
+            EXPECT_EQ(Epd::sanToMove(g, s, m), Epd::San::Ok) << e.id << " am " << s;
+        }
+    }
+    EXPECT_EQ(count, 300);
 }

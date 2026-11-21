@@ -46,6 +46,7 @@ add_executable(runAllTests
     ../engine/search/src/quiescence.cc
     ../engine/search/src/ordering.cc
     ../engine/search/src/iterdeep.cc
+    ../engine/search/src/epd.cc
 
 )
 
@@ -112,6 +113,8 @@ add_executable(bench
     ../engine/search/src/alphabeta.cc
     ../engine/search/src/quiescence.cc
     ../engine/search/src/ordering.cc
+    ../engine/search/src/iterdeep.cc
+    ../engine/search/src/epd.cc
 )
 target_compile_definitions(bench PRIVATE BENCH_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${BENCH_BUILD_TYPE}}" BENCH_BUILD_TYPE_NAME="${CMAKE_BUILD_TYPE}")
 
