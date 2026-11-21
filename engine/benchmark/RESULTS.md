@@ -456,3 +456,157 @@ cmake -S test -B build-bench -DCMAKE_BUILD_TYPE=Release && cmake --build build-b
 `c2_summary.py` prints the tables above, the same-move check (exit status 1 on a mismatch) and writes
 `c2_summary.csv`. The seed-move node counts in (b) come from `bench split engine/benchmark/positions.epd <id> 5` for
 each id in `positions.epd`.
+
+## C4: how many Win At Chess positions does the engine solve?
+
+**Metric: % of the 300 Win At Chess (WAC) positions where the engine's move is one of the suite's best moves (`bm`),
+one `IterDeep::search` per position at a hard per-move limit, 1 thread.**
+
+| time per move | solved | median completed depth | positions with no completed depth | time per move: median / p99 / max | median nodes of the last completed depth |
+|---|---|---|---|---|---|
+| 100 ms | **80/300 (26.7%)** | 1 | 69 | 103.6 / 113.0 / 118.1 ms | 1,824 |
+| 1000 ms | **123/300 (41.0%)** | 3 | 10 | 1003.5 / 1010.6 / 1012.5 ms | 15,182 |
+
+The engine is the real one: `AlphaBeta::pruning`, `ordering` and `quiescence` all on (their defaults), `threads = 1`,
+`IterDeep::search(game, history, ms, 1, 64, 1)`. `maxDepth` is 64, not the default 8, so the clock and not the depth cap
+ends the search. "Solved" = the engine's move equals any `bm` move and no `am` move. "Completed depth" = the last depth
+that finished before the deadline; 0 means even depth 1 was cut off and the move is the best of the root moves searched
+so far (11 of those 69 are solved at 100 ms, 0 of 10 at 1 s).
+
+Time-per-move check: the limit is a hard deadline, and the largest overrun is 18.1 ms at 100 ms and 12.5 ms at 1000 ms
+(requirement: at most 50 ms). The time is measured around the `IterDeep::search` call only.
+
+### The WAC file
+
+| | |
+|---|---|
+| File | `engine/benchmark/wac.epd`, 300 positions, ids `WAC.001` to `WAC.300` |
+| Source | `https://raw.githubusercontent.com/jdart1/arasan-chess/207a88358c414c15eec7933774d25ffe24fd4598/tests/wacnew.epd` (Arasan chess engine repository, `tests/wacnew.epd`, last changed in commit `207a883`, "initial import of 15.5 sources", 2013-05-13; the file on `master` at `daba70f`, 2026-11-20, is byte-identical) |
+| Edition | `wacnew`. The chessprogramming wiki page "Win at Chess" says WAC "was revised by Fred Wilson [in 2001] and converted into algebraic chess notation" and prints an "EPD Wacnew" record that matches all 300 lines of this file. The file itself carries no header or version text, so that identification comes from the wiki, not from the file. It lists alternative best moves: 37 positions have more than one `bm`, and WAC.274 has an `am`. |
+| SHA-256 | `9bfb7b42cf5bbc7f3d60ff767ca3be460e0ae4d9110ef9a71ddf0bd7071d4d46` |
+
+A second public copy exists: John Bergbom's `http://www.bergbomconsulting.se/chess/epdfiles/wac.epd` (linked from the same
+wiki page, SHA-256 `e1eab24c3c609012b1aa6d8b4f532429ce61c2217402efd051297303e78a09e8`, plain http, CRLF, no edition
+statement). It differs on 22 of 300 lines, always with fewer accepted moves. Re-scoring the same engine moves against it
+gives 77/300 (25.7%) at 100 ms and 119/300 (39.7%) at 1 s, so the edition is worth about 1 point.
+
+Checks:
+
+- All 300 FENs load through `Game::loadFEN` (the `bench wac` run aborts on a bad FEN; also asserted in
+  `EpdTest.EveryWacBestMoveResolves`). No failures.
+- Every `bm` and `am` SAN in the file resolves through `Epd::sanToMove` to exactly one legal engine move (same test). No unresolved moves, so no matcher or move-generator problem showed up.
+- The file contains no promotion at all, so there are no underpromotion (unsolvable) positions. The matcher still
+  reports one separately (`EpdTest.QueenPromotion`), and the `note` column of both CSVs is empty.
+
+### The hard deadline (what changed in the engine)
+
+Before this task `IterDeep` read the clock only between depths, so one "1 s" move could take far longer. Now
+`alphabeta()` and `quiescence()` read a shared stop flag at every node and the clock every 256 nodes of their own
+counters (so on every thread when `threads > 1`); a depth still running at the deadline is aborted and the last
+completed depth is returned.
+
+**Deviation from the brief: depth 1 is not exempt.** The brief asked that depth 1 always completes. Measured at HEAD
+before the change (`AlphaBeta::search` depth 1, quiescence on, 1 thread, one run per position, scratch driver, not
+committed, machine not idle): median 22.6 ms, p90 445 ms, maximum 34.4 s, 76 of 300 positions over 100 ms and 10 over 1 s. With an
+exempt depth 1 the time limit could not hold (max time per move must be within 50 ms of the limit). So depth 1 aborts
+too, and if no depth completed, `IterDeep` returns the best of the root moves searched before the cut (a legal move,
+never the `{-1,-1,-1,-1}` sentinel when a move exists; `result.depth == 0`). The 10 positions with no completed depth at
+1 s are exactly the 10 whose depth 1 took over 1 s at HEAD: WAC.030, 050, 070, 079, 103, 114, 177, 196, 259, 266. The
+cause is the quiescence search (no move ordering, unbounded captures). `minDepth` is now only the starting depth.
+
+Check frequency: with the clock read every 1024 nodes the overrun was too large for comfort (scratch run at 100 ms:
+median 113.4 ms, max 140.0 ms), so it is every 256 nodes (scratch run: median 103.5 ms, max 132.5 ms; the final run
+above: max 118.1 ms). A node costs roughly 10 to 15 us.
+
+**No deadline set means no change.** `AlphaBeta::search` called directly keeps `deadline = time_point::max()`, and the
+node counters do not change:
+
+- `bench time` at depth 5, 1 thread, quiescence off, versus `mvv5_main` in `results/c1.csv`: op1 51,078 = 51,078 (score
+  70), mg4 365,714 = 365,714 (155), eg2 9,995 = 9,995 (115).
+- Quiescence on, five searches (Kiwipete depth 1, start position depth 3, WAC.001 depth 3, WAC.002 depth 4, WAC.004
+  depth 3; scratch driver, not committed), HEAD versus the new code: move, score, main nodes and quiescence nodes are
+  identical for all five (for example Kiwipete depth 1: move 64-20, score 70, 48 main and 1,832,879 quiescence nodes).
+  The wall time of the five searches was 52.7 s (HEAD) and 52.5 s (new), so the checks cost nothing measurable.
+
+Tests added: `IterDeepTest.HardDeadlineStopsBusyMiddlegame` (50 ms limit on Kiwipete returns a legal move in under 150
+ms), `HardDeadlineNeverReturnsSentinel` (limits 1, 5 and 20 ms, 1 and 4 threads), `HardDeadlineLeavesNoStateBehind` (a
+plain search gives identical score and node counts before and after a deadline search; stop flag and deadline are
+reset), `ReportsCompletedDepth`; nine `EpdTest` cases (plain move, capture, both castles for both colours, file and rank
+disambiguation, queen promotion and underpromotion, unknown/illegal/ambiguous SAN, the parser, and every `bm` in the file).
+All 142 tests pass (129 before); no existing `IterDeepTest` needed a change. ThreadSanitizer reports nothing on
+`IterDeepTest.HardDeadline*` and `ParallelSearchTest.*` (11 tests, including the 4-thread deadline path).
+
+### Setup
+
+| | |
+|---|---|
+| Measured at commit | `ed0d72d` (clean tree; the result files and this section were added afterwards) |
+| Run | 2026-11-20, 23:18:20 to 23:23:52 PST, `engine/benchmark/c4.sh` (100 ms control first, then 1000 ms), one run per control |
+| CPU | Apple M5, 10 cores (4 performance + 6 efficiency); the search uses 1 thread |
+| Compiler and flags | Apple clang 21.0.0 (clang-2100.1.1.101), `-O3 -DNDEBUG` (CMake `Release`) |
+| macOS | 26.6.2 (25G83) |
+| Machine state | AC power (100% charged), lid open, no thermal or performance warning recorded. `vm.swapusage`: 17,031 MB used of 18,432 MB before the run, 17,103 MB after. Chrome, Discord and Claude Code were running in the background (10 to 20% CPU each at the last check before the run); nothing of mine ran. `c4.sh` held the machine awake with `caffeinate -ims`. |
+
+### Results by completed depth
+
+Positions (solved) by the depth completed before the deadline:
+
+| depth | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| 100 ms | 69 (11) | 144 (19) | 46 (22) | 33 (23) | 6 (4) | 2 (1) | | |
+| 1000 ms | 10 (0) | 65 (9) | 71 (30) | 99 (42) | 35 (29) | 15 (9) | 3 (3) | 2 (1) |
+
+Agreement between the two controls: 69 positions are solved at both, 54 only at 1 s, and 11 only at 100 ms (WAC.030,
+060, 063, 108, 134, 194, 220, 232, 249, 272, 292). Five of those eleven were cut during depth 1 at 100 ms (WAC.030, 063,
+220, 249, 272); the root moves are searched captures first, and the `bm` is a capture in four of them (Nxd6, Nxf7, Qxf1+,
+Bxc5). The other six finished depth 1 or 2 at 100 ms and changed their answer at depth 3 or 4 at 1 s. 17 of the 37 multi-`bm` positions are solved at 1 s (46%), 106 of the 263
+single-`bm` positions (40%).
+
+Notable failures at 1 s: WAC.100 reached depth 7 and still played a4a3 (`bm` Be3 b6+); WAC.002, 018, 041, 087, 229 and
+230 reached depth 5 without finding the `bm`. The wiki page lists several forum threads about the solution of WAC.230
+being disputed, so a miss there says little. The depth-0 positions are all misses.
+
+Raw rows: `results/c4_100ms.csv` and `results/c4_1000ms.csv`, columns `id,solved,engine_move,bm,depth,nodes,ms,note`
+(`engine_move` is from-to, for example `g3g6`; `bm` is the SAN as written in the file; `nodes` is main plus quiescence
+nodes of the returned search only, the last completed depth, or the cut-off depth 1 when `depth` is 0, so it is not the
+total nodes searched and cannot give nodes per second).
+
+### Bullet
+
+Solved 41.0% of the WAC tactical suite at 1 s per move by **...**
+
+Suggested phrasing for the missing clause: "by iterative-deepening alpha-beta search with MVV-LVA move ordering and
+quiescence search under a hard per-move deadline (single thread, all 300 positions; 26.7% at 100 ms)".
+
+Qualifiers to keep next to the number: it is this engine on one laptop thread (median completed depth 3 at 1 s), not a
+statement about the suite, and the `wacnew` edition accepts extra best moves (39.7% against the Bergbom file).
+
+### Caveats
+
+- Single thread (`threads = 1`), so the figures say nothing about the parallel root search.
+- One run per control. The deadline cuts the search by wall time, so a position near a depth boundary can flip between
+  runs; the run-to-run spread was not measured. The machine had about 17 GB of 18 GB swap in use and background apps.
+- The move generator accepts a few illegal moves (22 extra depth-4 leaves from the start position versus standard perft).
+  The engine could therefore, rarely, consider an illegal move, and the SAN matcher uses the same generator. Not fixed.
+- The engine promotes only to a queen. No WAC `bm` involves a promotion, so this does not affect the score.
+- Depth 1 can be cut by the deadline (see above): 69 positions at 100 ms and 10 at 1 s are decided by a partial depth-1
+  search whose root moves are ordered captures first.
+- `maxDepth` was 64 instead of the default 8. The deadline is process-global state, so only one `IterDeep::search`
+  can run at a time.
+- Not compared with published WAC scores: those come from other engines, hardware and time controls.
+
+### Files and reproduce
+
+- `wac.epd`: the suite. `results/c4_100ms.csv`, `results/c4_1000ms.csv`: raw rows.
+- `c4.sh`: guards (AC power, lid open), `caffeinate`, then `bench wac` at 100 ms and 1000 ms. The scoring is in
+  `sim.cc` (`bench wac <epd> <ms> <csv>`), the parser and matcher in `engine/search/src/epd.cc`.
+
+From the repository root (about 5.5 min; needs AC power and an open lid, `c4.sh` refuses to run otherwise; it overwrites
+the two CSVs; do not run anything else heavy while it runs):
+
+```
+cmake -S test -B build-bench -DCMAKE_BUILD_TYPE=Release && cmake --build build-bench --target bench -j8 && engine/benchmark/c4.sh
+```
+
+`bench wac` prints the solved count, median completed depth, the time per move (median and max) and the note lines to
+stdout; the machine state goes to stderr. The tests: `cmake --build build-bench --target runAllTests -j8 && build-bench/bin/runAllTests`.
