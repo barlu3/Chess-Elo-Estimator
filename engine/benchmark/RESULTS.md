@@ -107,6 +107,43 @@ mkdir -p engine/benchmark/results && cmake -S test -B build-bench -DCMAKE_BUILD_
 `bench` prints the compiler and flags, the identity-check progress, and the markdown table and aggregates shown
 above. Keep the machine otherwise idle while it runs, because the timed searches share the CPU.
 
+### C3: nodes per second
+
+Main-search nodes per second (static-eval leaves, one node = one `alphabeta()` call), computed from existing data, no
+new runs: `python3 -I engine/benchmark/c3_nps.py`.
+
+**Depth 6, 1 thread (C1, one run per position):** median 59,387 NPS over the 20 positions (min 19,295, max 291,122);
+pooled (sum of nodes / sum of seconds) 44,859. Excluding eg3 and eg4 (under 50 ms): median 56,531 (min 19,295, max 124,103),
+pooled 44,840.
+
+**Depth 5, 1/2/4/8 threads (C2):** per (position, threads) the median over 7 runs of `main_nodes / seconds`, then the
+median over positions; pooled = sum of median nodes / sum of median seconds. Total across all workers, not per thread.
+
+| threads | median NPS (20 positions) | pooled NPS (20) | median NPS (excl. under 50 ms) | pooled NPS (excl.) |
+|---|---|---|---|---|
+| 1 | 86,572 | 71,630 | 81,489 (18) | 71,570 |
+| 2 | 79,677 | 68,218 | 71,375 (18) | 68,167 |
+| 4 | 141,316 | 131,629 | 136,085 (18) | 131,562 |
+| 8 | 161,869 | 154,592 | 150,214 (17) | 154,045 |
+
+Exclusion: a position is dropped from a row if its median time at that row's thread count is under 50 ms. That is eg3
+(4 to 6 ms) and eg4 (1 to 2 ms) at every thread count, plus eg1 at 8 threads only (47.0 ms; its other cells are 54 to
+113 ms), hence 17 positions in the last row. The pooled figures barely move because the pooled sum is dominated by the
+heavy positions. The pooled ratios to 1 thread (0.95x, 1.84x, 2.16x) are the "pooled throughput vs 1T" column of C2.
+
+**Cross-check against C1 (depth 5, 1 thread):** C1's single runs give a median of 81,803 NPS and a pooled 63,675. C2's
+median of 7 is 5.8% higher on median NPS (11.7% excluding eg3 and eg4) and 12.5% higher pooled; the per-position ratio has
+a median of 1.03 (range 0.94 to 1.66). The node counts are identical (checked in the script), so the gap is time: C1's
+single runs were slower on mg3 (1.66x), mg7 (1.31x), mg4 (1.25x) and mg5 (1.24x), which dominate the pooled figure.
+So the two agree to 3% per position at the median and 12% pooled; C1 is one run per cell, so the gap is probably
+run-to-run noise (not tested).
+
+Context: these count main-search nodes with static-eval leaves (quiescence off); the real engine with quiescence
+visits more nodes per search, so its NPS differs. The low absolute speed (tens of thousands of nodes per second) is
+attributed to the per-candidate `Board` copies in move generation (read from the code, not profiled; see point 4 of the
+C2 diagnosis). Multi-thread NPS is the total over all workers, not per thread: 8 threads reach 2.2x the 1-thread pooled
+NPS, about 0.27x per thread.
+
 ## C2: how does the search scale across threads?
 
 **Metric: wall-clock speedup of one fixed-depth `AlphaBeta::search` on N threads versus 1 thread, depth 5, 20 positions.**
