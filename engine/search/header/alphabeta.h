@@ -23,11 +23,11 @@ class AlphaBeta {
 
         static long long alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta);
 
-        //threads<=1 runs the sequential root; threads>1 splits the root moves across
-        //workers, each with its own Game copy and its own MoveHistory. Parallel workers
-        //cannot share the narrowing alpha, so they visit more nodes than the sequential
-        //search, but agree on the returned score. Ties break on the earliest root move
-        //so the result stays reproducible regardless of thread scheduling.
+        //threads<=1 runs the sequential root; threads>1 seeds with root move 0, then
+        //workers take the remaining root moves dynamically, each with a window narrowed
+        //by the shared best score. The returned move and score equal the sequential
+        //search (ties go to the earliest root move); the node count can differ.
+        //Each worker copies the Game and uses its own MoveHistory.
         static SearchResult search(Game& game, MoveHistory& history, int depth, int threads = 1);
 };
 

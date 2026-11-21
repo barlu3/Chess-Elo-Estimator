@@ -1873,11 +1873,46 @@ TEST(PSTTest, EvaluatorReflectsKnightImprovement) {
 // PARALLEL ROOT SEARCH TESTS
 // ─────────────────────────────────────────────
 // AlphaBeta::search and IterDeep::search take an opt-in thread count.
-// threads<=1 keeps the original sequential path; threads>1 splits the ROOT
-// moves across workers, each with its own Game copy and fresh MoveHistory.
-// Parallel workers cannot share the narrowing alpha, so the node counts differ
-// from the sequential search — but the returned score must still agree, and
-// ties must break deterministically on the earliest root move.
+// threads<=1 keeps the original sequential path; threads>1 seeds with root move 0,
+// then hands the remaining ROOT moves to workers dynamically, each with its own
+// Game copy, fresh MoveHistory and a window narrowed by the shared best score.
+// Node counts differ from the sequential search, but the returned move and score
+// must agree, and ties must break deterministically on the earliest root move.
+
+// Parallel search must return the sequential move and score for each thread count.
+static void expectSameAsSequential(const std::string& fen, int depth) {
+    Game ref;
+    ASSERT_TRUE(ref.loadFEN(fen)) << fen;
+    MoveHistory refHistory;
+    SearchResult expected = AlphaBeta::search(ref, refHistory, depth, 1);
+
+    for (int threads : {2, 4, 8}) {
+        Game game;
+        ASSERT_TRUE(game.loadFEN(fen)) << fen;
+        MoveHistory history;
+        SearchResult result = AlphaBeta::search(game, history, depth, threads);
+
+        std::string where = fen + " threads=" + std::to_string(threads);
+        EXPECT_EQ(result.score, expected.score) << where;
+        EXPECT_EQ(result.bestMove.fromRow, expected.bestMove.fromRow) << where;
+        EXPECT_EQ(result.bestMove.fromCol, expected.bestMove.fromCol) << where;
+        EXPECT_EQ(result.bestMove.toRow, expected.bestMove.toRow) << where;
+        EXPECT_EQ(result.bestMove.toCol, expected.bestMove.toCol) << where;
+    }
+}
+
+TEST(ParallelSearchTest, MatchesSequentialMoveAndScore) {
+    expectSameAsSequential("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 3);
+    expectSameAsSequential("r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4", 2);
+    expectSameAsSequential("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 3);
+    expectSameAsSequential("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R b KQ - 1 8", 2);
+    // Ra8# and Rb8# both mate: the earliest root move must win in both searches.
+    Game tie;
+    ASSERT_TRUE(tie.loadFEN("6k1/5ppp/8/8/8/8/8/RR4K1 w - - 0 1"));
+    MoveHistory tieHistory;
+    EXPECT_EQ(AlphaBeta::search(tie, tieHistory, 2, 1).score, 100000);
+    expectSameAsSequential("6k1/5ppp/8/8/8/8/8/RR4K1 w - - 0 1", 2);
+}
 
 // The parallel root must agree with the sequential root on score.
 TEST(ParallelSearchTest, ScoreMatchesSequentialAtDepth2) {
