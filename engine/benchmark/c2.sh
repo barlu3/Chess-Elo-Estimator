@@ -6,17 +6,23 @@ cd "$(dirname "$0")/../.." || exit 1
 BENCH=build-bench/bin/bench
 EPD=engine/benchmark/positions.epd
 OUT=${OUT:-engine/benchmark/results/c2_runs.csv}
-SPLIT=${SPLIT:-engine/benchmark/results/c2_split.csv}
 DEPTH=${DEPTH:-6}
 REPS=${1:-7}
 THREADS="1 2 4 8"
 
 [ -x "$BENCH" ] || { echo "bench not executable: $BENCH" >&2; exit 1; }
 
+# Timings on battery are not comparable with AC runs, so refuse to time.
+pmset -g batt | head -1 | grep -q "AC Power" || { echo "not on AC power, refusing to time" >&2; exit 1; }
+# A closed lid sleeps the machine, which would corrupt the timings.
+ioreg -r -k AppleClamshellState | grep -q '"AppleClamshellState" = Yes' && { echo "lid is closed, the machine will sleep; refusing to time" >&2; exit 1; }
+# keep the machine awake for the whole run; idle sleep freezes the benchmark and corrupts wall times
+caffeinate -ims -w $$ &
+
 IDS=$(awk -F';' '/^#/ || /^[[:space:]]*$/ {next} {gsub(/ /,"",$2); if (n++) printf " "; printf "%s", $2}' "$EPD")
 
-# Create output directories up front so a long run does not fail at the split step.
-mkdir -p "$(dirname "$OUT")" "$(dirname "$SPLIT")"
+# Create the output directory up front so a long run does not fail on its first write.
+mkdir -p "$(dirname "$OUT")"
 [ -e "$OUT" ] || echo "rep,id,threads,workers,depth,main_nodes,ms,best_move,score" > "$OUT"
 
 # Record machine state (battery and thermal) for later interpretation of the timings.
@@ -36,12 +42,6 @@ for rep in $(seq 1 "$REPS"); do
       echo "rep $rep/$REPS $id t=$t" >&2
     done
   done
-done
-
-# Node counts are deterministic, so they are collected once after timing and not timed.
-echo "id,index,nodes" > "$SPLIT"
-for id in $IDS; do
-  "$BENCH" split "$EPD" "$id" "$DEPTH" >> "$SPLIT" || { echo "split failed: $id" >&2; exit 1; }
 done
 
 date >&2

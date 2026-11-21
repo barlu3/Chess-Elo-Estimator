@@ -2,14 +2,12 @@
 """Summarize the C2 thread-scaling benchmark (stdlib only; run from repo root)."""
 import csv
 import math
-import os
 import statistics
 import sys
 from collections import defaultdict
 
 RUNS = sys.argv[1] if len(sys.argv) > 1 else "engine/benchmark/results/c2_runs.csv"
 SUMMARY = sys.argv[2] if len(sys.argv) > 2 else "engine/benchmark/results/c2_summary.csv"
-SPLIT = sys.argv[3] if len(sys.argv) > 3 else "engine/benchmark/results/c2_split.csv"
 THREADS = [1, 2, 4, 8]
 PARALLEL = [2, 4, 8]
 
@@ -100,16 +98,12 @@ else:
 
 counts = [s["runs"] for s in stats.values()]
 print(f"repetitions per (position, thread count): min {min(counts)}, max {max(counts)}")
-parallel_nodes = defaultdict(set)
-for r in runs:
-    if r["threads"] > 1:
-        parallel_nodes[r["id"]].add(r["nodes"])
-bad_nodes = [pid for pid in order if len(parallel_nodes[pid]) != 1]
-if bad_nodes:
-    print("main-node counts identical across all runs with threads>1 for the same id: "
-          "no (ids: " + ", ".join(bad_nodes) + ")\n")
-else:
-    print("main-node counts identical across all runs with threads>1 for the same id: yes\n")
+# Dynamic root-move hand-out makes parallel node counts vary between runs; report how much.
+spread = max(((max(r["nodes"] for r in cells[(pid, t)]) - min(r["nodes"] for r in cells[(pid, t)]))
+              / stats[(pid, t)]["median_nodes"] * 100, pid, t)
+             for pid in order for t in PARALLEL)
+print(f"main-node count spread across repetitions (threads>1): max {spread[0]:.2f}% "
+      f"({spread[1]}, {spread[2]}T)\n")
 
 # ---- C: per-position tables ----
 table(["id", "workers (2/4/8 threads)", "median ms: 1T", "2T", "4T", "8T",
@@ -131,10 +125,19 @@ for t in THREADS:
                  / sum(stats[(pid, t)]["median_ms"] for pid in order))
     pooled_inf = (sum(stats[(pid, t)]["median_nodes"] for pid in order)
                   / sum(stats[(pid, 1)]["median_nodes"] for pid in order))
+    # Sensitivity check: min-of-reps timings are less affected by interference than medians.
+    pooled_min = (sum(stats[(pid, 1)]["min_ms"] for pid in order)
+                  / sum(stats[(pid, t)]["min_ms"] for pid in order))
+    thr = ((sum(stats[(pid, t)]["median_nodes"] for pid in order)
+            / sum(stats[(pid, t)]["median_ms"] for pid in order))
+           / (sum(stats[(pid, 1)]["median_nodes"] for pid in order)
+              / sum(stats[(pid, 1)]["median_ms"] for pid in order)))
     rows.append([t, f"{statistics.median(sp):.2f}", f"{geo(sp):.2f}", f"{pooled[t]:.2f}",
-                 f"{statistics.median(inf):.2f}", f"{pooled_inf:.2f}"])
+                 f"{statistics.median(inf):.2f}", f"{pooled_inf:.2f}",
+                 f"{pooled_min:.2f}", f"{thr:.2f}"])
 table(["threads", "median speedup", "geo-mean speedup", "pooled speedup",
-       "median node inflation", "pooled node inflation"], rows)
+       "median node inflation", "pooled node inflation", "pooled speedup (min ms)",
+       "pooled throughput vs 1T"], rows)
 
 # ---- E: speedup curve ----
 table(["threads", "ideal", "pooled speedup", "efficiency (pooled/threads)"],
@@ -143,66 +146,6 @@ print("```")
 for t in THREADS:
     print(f"{t}T |{'#' * round(pooled[t] / 0.25)} {pooled[t]:.2f}x (ideal {t}x)")
 print("```\n")
-
-# ---- F: imbalance (only when the split file exists) ----
-if not os.path.exists(SPLIT):
-    print(f"imbalance section skipped: {SPLIT} not found\n")
-else:
-    with open(SPLIT, newline="") as f:
-        reader = csv.DictReader(f)
-        check(reader.fieldnames is not None and all(c in reader.fieldnames
-                                                    for c in ["id", "index", "nodes"]),
-              f"{SPLIT}: header must contain id,index,nodes")
-        split = defaultdict(dict)  # id -> root-move index -> subtree nodes
-        for row in reader:
-            i = int(row["index"])
-            check(i not in split[row["id"]], f"duplicate index {i} for id {row['id']}")
-            split[row["id"]][i] = int(row["nodes"])
-    for pid in order:
-        check(split.get(pid), f"no split rows for id {pid}")
-
-    imb = {}  # (id, threads) -> imbalance numbers for that cell
-    for pid in order:
-        for n in PARALLEL:
-            w_eff = stats[(pid, n)]["workers"]
-            loads = [0] * w_eff
-            for i, nodes in split[pid].items():
-                loads[i % w_eff] += nodes  # worker k gets root moves with index % w == k
-            total = sum(split[pid].values())
-            if w_eff > 1:
-                check(total == stats[(pid, n)]["median_nodes"],
-                      f"{pid} threads={n}: split total {total} != median main_nodes "
-                      f"{stats[(pid, n)]['median_nodes']}")
-            makespan = max(loads)
-            imb[(pid, n)] = {"total": total, "makespan": makespan, "w": w_eff,
-                             "balance": total / (w_eff * makespan),
-                             "bound": stats[(pid, 1)]["median_nodes"] / makespan}
-
-    rows = []
-    for pid in order:
-        row = [pid, "/".join(str(stats[(pid, n)]["workers"]) for n in PARALLEL)]
-        for n in PARALLEL:
-            d = imb[(pid, n)]
-            row += [f"{d['balance']:.2f}", f"{d['bound']:.2f}",
-                    f"{stats[(pid, n)]['speedup']:.2f}"]
-        rows.append(row)
-    table(["id", "workers (2/4/8 threads)", "2T balance", "2T node-bound speedup",
-           "2T measured speedup", "4T balance", "4T node-bound speedup",
-           "4T measured speedup", "8T balance", "8T node-bound speedup",
-           "8T measured speedup"], rows)
-
-    rows = []
-    for n in PARALLEL:
-        infl = (sum(stats[(pid, n)]["median_nodes"] for pid in order)
-                / sum(stats[(pid, 1)]["median_nodes"] for pid in order))
-        bal = (sum(imb[(pid, n)]["total"] for pid in order)
-               / sum(imb[(pid, n)]["w"] * imb[(pid, n)]["makespan"] for pid in order))
-        bound = (sum(stats[(pid, 1)]["median_nodes"] for pid in order)
-                 / sum(imb[(pid, n)]["makespan"] for pid in order))
-        rows.append([n, f"{infl:.2f}", f"{bal:.2f}", f"{bound:.2f}", f"{pooled[n]:.2f}",
-                     f"{pooled[n] / bound:.2f}"])
-    table(["threads", "pooled node inflation", "pooled balance", "pooled node-bound speedup",
-           "pooled measured speedup", "residual (measured / node-bound)"], rows)
 
 print(f"wrote {SUMMARY}")
 sys.exit(1 if bad_move else 0)
