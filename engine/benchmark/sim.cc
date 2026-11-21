@@ -3,6 +3,8 @@
 #include "search/MoveExecutor.h"
 #include "search/header/alphabeta.h"
 #include "search/header/ordering.h"
+#include "search/header/iterdeep.h"
+#include "search/header/epd.h"
 
 #include <algorithm>
 #include <atomic>
@@ -335,13 +337,107 @@ static int run(const std::string& epdPath, const std::string& csvPath) {
     return mismatches == 0 ? 0 : 1;
 }
 
+static double median(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    size_t n = v.size();
+    return n % 2 ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
+}
+
+// Scores the Win At Chess suite: one IterDeep search per position, stopped only by the clock.
+static int wac(const std::string& epdPath, int ms, const std::string& csvPath) {
+    CHECK(ms >= 1);
+    printBuildInfo();
+    std::ifstream in(epdPath);
+    CHECK(in.is_open());
+    std::ofstream csv(csvPath);
+    CHECK(csv.is_open());
+    csv << std::fixed << std::setprecision(1);
+    csv << "id,solved,engine_move,bm,depth,nodes,ms,note\n";
+    csv.flush();
+
+    int solvedCount = 0, zeroDepth = 0;
+    std::vector<double> depths, times;
+    std::vector<std::pair<std::string, std::string>> notes;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty()) continue;
+
+        EpdEntry e;
+        CHECK(Epd::parse(line, e));
+        Game game;
+        bool loaded = game.loadFEN(e.fen);
+        if (!loaded) std::fprintf(stderr, "bad FEN for id %s\n", e.id.c_str());
+        CHECK(loaded);
+
+        std::vector<Move> best, avoid;
+        std::string note;
+        auto resolve = [&](const std::vector<std::string>& sans, std::vector<Move>& out, const std::string& prefix) {
+            for (const std::string& san : sans) {
+                Move mv{};
+                switch (Epd::sanToMove(game, san, mv)) {
+                    case Epd::San::Ok: out.push_back(mv); break;
+                    case Epd::San::Underpromotion: note += prefix + "underpromotion:" + san + " "; break;
+                    case Epd::San::NoMatch: note += prefix + "unresolved:" + san + " "; break;
+                }
+            }
+        };
+        resolve(e.bm, best, "");
+        resolve(e.am, avoid, "am-");
+        if (!e.bm.empty() && best.empty()) note = "unsolvable " + note;
+        note = trim(note);
+
+        Game g = game;
+        MoveHistory history;
+        auto start = std::chrono::steady_clock::now();
+        // maxDepth 64: the clock, not the default depth cap, must end the search; threads 1, AlphaBeta switches are all left at their default (on)
+        SearchResult r = IterDeep::search(g, history, ms, 1, 64, 1);
+        double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+
+        const Move& engine = r.bestMove;
+        auto same = [&](const Move& m) {
+            return m.fromRow == engine.fromRow && m.fromCol == engine.fromCol && m.toRow == engine.toRow && m.toCol == engine.toCol;
+        };
+        bool hit = e.bm.empty() || std::any_of(best.begin(), best.end(), same);
+        bool solved = hit && std::none_of(avoid.begin(), avoid.end(), same);
+        std::string engineMove = {char('a' + engine.fromCol), char('0' + 8 - engine.fromRow),
+                                  char('a' + engine.toCol), char('0' + 8 - engine.toRow)};
+        std::string bmText;
+        for (size_t i = 0; i < e.bm.size(); i++) bmText += (i ? " " : "") + e.bm[i];
+        long long nodes = r.mainNodes + r.quiescenceNodes;
+
+        csv << e.id << ',' << (solved ? 1 : 0) << ',' << engineMove << ',' << bmText << ',' << r.depth << ','
+            << nodes << ',' << elapsed << ',' << note << '\n';
+        csv.flush();
+        std::printf("%s solved=%d\n", e.id.c_str(), solved ? 1 : 0);
+        std::fflush(stdout);
+
+        solvedCount += solved ? 1 : 0;
+        if (r.depth == 0) zeroDepth++;
+        depths.push_back(r.depth);
+        times.push_back(elapsed);
+        if (!note.empty()) notes.push_back({e.id, note});
+    }
+    CHECK(!times.empty());
+
+    int n = (int)times.size();
+    std::printf("wac %d ms: solved %d/%d (%.1f%%)\n", ms, solvedCount, n, 100.0 * solvedCount / n);
+    std::printf("median completed depth: %.1f, positions with depth 0 (first depth cut off): %d\n", median(depths), zeroDepth);
+    std::printf("time per move: median %.1f ms, max %.1f ms\n", median(times), *std::max_element(times.begin(), times.end()));
+    for (const auto& entry : notes) std::printf("note: %s %s\n", entry.first.c_str(), entry.second.c_str());
+    std::fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     std::string cmd = argc > 1 ? argv[1] : "";
     if (cmd == "probe" && argc == 4) return probe(argv[2], argv[3]);
     if (cmd == "run" && argc == 4) return run(argv[2], argv[3]);
     if (cmd == "time" && argc == 6) return timeRun(argv[2], argv[3], std::atoi(argv[4]), std::atoi(argv[5]));
     if (cmd == "split" && argc == 5) return splitRun(argv[2], argv[3], std::atoi(argv[4]));
+    if (cmd == "wac" && argc == 5) return wac(argv[2], std::atoi(argv[3]), argv[4]);
     std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n"
-                         "       bench time <epd> <id> <depth> <threads>\n       bench split <epd> <id> <depth>\n");
+                         "       bench time <epd> <id> <depth> <threads>\n       bench split <epd> <id> <depth>\n"
+                         "       bench wac <epd> <ms> <csv>\n");
     return 1;
 }
