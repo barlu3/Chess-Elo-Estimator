@@ -109,9 +109,199 @@ above. Keep the machine otherwise idle while it runs, because the timed searches
 
 ## C2: how does the search scale across threads?
 
-Status: the diagnosis and the fix below are done. The 1/2/4/8-thread measurement over the 20 positions
-(`c2.sh`, `c2_summary.py`) has not been run yet: the machine went to sleep (lid closed, on battery) and wall times
-taken in that state are meaningless. `c2.sh` now refuses to run on battery or with the lid closed.
+**Metric: wall-clock speedup of one fixed-depth `AlphaBeta::search` on N threads versus 1 thread, depth 5, 20 positions.**
+Configuration: ab+mvvlva (`pruning = true`, `ordering = true`) with static-eval leaves (`quiescence = false`), the same
+as C1, on the same 20 positions (`positions.epd`). Every (position, thread count) is a separate process, 7 repetitions
+each, 560 runs. Speedup = median 1-thread ms / median N-thread ms over the 7 repetitions. This is the search after the
+parallel-root fix (commit `9832a84`); the original parallel root and why it was replaced are described under
+"Before the fix" below.
+
+**Depth 5, not depth 6.** The C1 depth-6 single-thread times add up to 237 s over the 20 positions. With the per-round
+time ratios seen in the before-fix gate and in the identical-work thread test below (about 3.5 to 5 single-thread
+sums per round), 7 rounds at depth 6 would take roughly 1.6 to 2.3 h, over the 1.5 h budget. The whole depth-5 run
+took 10 min (single-thread sum 25.4 s). A firm after-fix depth-6 projection was not possible: the machine slept
+(lid closed) during that attempt, so those timings were discarded.
+
+### Setup
+
+| | |
+|---|---|
+| Measured at commit | `aa7f76a` (clean tree; the result files were added afterwards) |
+| Parallel root fix | commit `9832a84` |
+| Run | 2026-11-20, 22:40:29 to 22:50:37 PST, 560 runs, `DEPTH=5 engine/benchmark/c2.sh 7` |
+| CPU | Apple M5, 10 cores (4 performance + 6 efficiency); `hardware_concurrency()` = 10 |
+| Workers | `min(threads, 10, number of root moves)`; the "workers" column below shows the effective count |
+| Compiler and flags | Apple clang 21.0.0 (clang-2100.1.1.101), `-O3 -DNDEBUG` (CMake `Release`) |
+| macOS | 26.6.2 (25G83) |
+| Machine state | AC power (100% charged), lid open, no thermal warning recorded. About 17 GB of 17 to 18 GB swap was in use (other apps), and system daemons (`mobileassetd`, `modelcatalogd`, `WindowServer`) were active. Nothing else of mine ran during the timing. |
+| Canary (mg4, depth 5, 1 thread) | 5.96, 6.27, 5.74, 5.82 s before the run; 5.73 s after (5.8 s earlier the same day) |
+| Order | rep, then position, then thread count; the thread order alternates `1 2 4 8` and `8 4 2 1` on odd and even reps |
+| Noise | (max - min) / median over the 7 reps, cells of at least 100 ms: median 10.6% at 1T, 26.5% at 2T, 20.9% at 4T, 19.6% at 8T; worst 137.5% (8T) |
+
+### Same-move check
+
+same-move check: OK (20 positions, 560 runs, identical best move and score across 1/2/4/8 threads and all repetitions)
+
+Best move and score are identical for every position across 1, 2, 4 and 8 threads and all 7 repetitions: no
+mismatch. (Tie-breaking on the earliest root move is covered by `ParallelSearchTest.MatchesSequentialMoveAndScore`.)
+
+- repetitions per (position, thread count): min 7, max 7
+- main-node count spread across repetitions (threads>1): max 11.40% (eg6, 8T)
+
+Node counts for 2, 4 and 8 threads vary a little between runs because the window a root move gets depends on when
+other workers finish; the tables use medians. The spread above is the largest across the 7 repetitions.
+
+### Per-position results
+
+Median wall ms over 7 repetitions, speedup against the 1-thread median, and the effective worker count at 2, 4 and 8
+threads (a position with few root moves cannot use all threads):
+
+| id | workers (2/4/8 threads) | median ms: 1T | 2T | 4T | 8T | speedup: 2T | 4T | 8T |
+|---|---|---|---|---|---|---|---|---|
+| op1 | 2/4/8 | 477 | 565 | 424 | 373 | 0.84 | 1.13 | 1.28 |
+| op2 | 2/4/8 | 503 | 479 | 434 | 403 | 1.05 | 1.16 | 1.25 |
+| op3 | 2/4/8 | 914 | 1142 | 876 | 974 | 0.80 | 1.04 | 0.94 |
+| op4 | 2/4/8 | 3499 | 3750 | 2166 | 2489 | 0.93 | 1.62 | 1.41 |
+| op5 | 2/4/8 | 5719 | 6327 | 3665 | 3996 | 0.90 | 1.56 | 1.43 |
+| op6 | 2/4/8 | 876 | 887 | 674 | 618 | 0.99 | 1.30 | 1.42 |
+| mg1 | 2/4/8 | 1121 | 1270 | 613 | 497 | 0.88 | 1.83 | 2.26 |
+| mg2 | 2/4/5 | 290 | 425 | 395 | 388 | 0.68 | 0.73 | 0.75 |
+| mg3 | 2/4/8 | 738 | 984 | 464 | 412 | 0.75 | 1.59 | 1.79 |
+| mg4 | 2/4/8 | 5890 | 6043 | 3054 | 2456 | 0.97 | 1.93 | 2.40 |
+| mg5 | 2/4/8 | 993 | 1202 | 566 | 468 | 0.83 | 1.75 | 2.12 |
+| mg6 | 2/4/8 | 575 | 667 | 569 | 581 | 0.86 | 1.01 | 0.99 |
+| mg7 | 2/4/8 | 2804 | 3432 | 1697 | 1431 | 0.82 | 1.65 | 1.96 |
+| eg1 | 2/4/8 | 95 | 113 | 55 | 47 | 0.84 | 1.74 | 2.03 |
+| eg2 | 2/4/8 | 69 | 130 | 100 | 58 | 0.53 | 0.69 | 1.18 |
+| eg3 | 2/4/4 | 4 | 6 | 5 | 5 | 0.79 | 0.91 | 0.97 |
+| eg4 | 2/3/3 | 1 | 2 | 2 | 2 | 0.78 | 0.80 | 0.79 |
+| eg5 | 2/4/8 | 567 | 667 | 377 | 322 | 0.85 | 1.51 | 1.76 |
+| eg6 | 2/4/8 | 95 | 136 | 75 | 78 | 0.70 | 1.28 | 1.23 |
+| eg7 | 2/4/8 | 145 | 178 | 107 | 138 | 0.82 | 1.36 | 1.05 |
+
+Node inflation = median N-thread main nodes / median 1-thread main nodes (the 1-thread counts equal C1's depth-5
+`ab+mvvlva` counts):
+
+| id | main nodes 1T | node inflation 2T | 4T | 8T |
+|---|---|---|---|---|
+| op1 | 51078 | 1.23 | 1.35 | 1.73 |
+| op2 | 46534 | 1.00 | 1.00 | 1.00 |
+| op3 | 57447 | 1.26 | 1.59 | 2.01 |
+| op4 | 234236 | 1.14 | 1.34 | 1.60 |
+| op5 | 412015 | 1.09 | 1.27 | 1.59 |
+| op6 | 77920 | 1.00 | 1.00 | 1.00 |
+| mg1 | 73672 | 1.00 | 1.00 | 1.00 |
+| mg2 | 12837 | 1.20 | 1.79 | 1.79 |
+| mg3 | 62199 | 1.00 | 1.00 | 1.06 |
+| mg4 | 365714 | 1.00 | 1.00 | 1.00 |
+| mg5 | 78165 | 1.00 | 1.00 | 1.00 |
+| mg6 | 44328 | 1.00 | 1.38 | 1.74 |
+| mg7 | 170285 | 1.05 | 1.13 | 1.17 |
+| eg1 | 14857 | 1.00 | 1.00 | 1.00 |
+| eg2 | 9995 | 1.23 | 1.72 | 1.84 |
+| eg3 | 1554 | 1.00 | 1.00 | 1.00 |
+| eg4 | 375 | 1.00 | 1.00 | 1.00 |
+| eg5 | 70272 | 1.06 | 1.28 | 1.36 |
+| eg6 | 14831 | 1.22 | 1.43 | 1.85 |
+| eg7 | 19537 | 1.09 | 1.20 | 1.81 |
+
+### Aggregates and speedup curve
+
+| threads | median speedup | geo-mean speedup | pooled speedup | median node inflation | pooled node inflation | pooled speedup (min ms) | pooled throughput vs 1T |
+|---|---|---|---|---|---|---|---|
+| 1 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 2 | 0.83 | 0.82 | 0.89 | 1.02 | 1.07 | 0.95 | 0.95 |
+| 4 | 1.33 | 1.27 | 1.56 | 1.16 | 1.18 | 1.82 | 1.84 |
+| 8 | 1.34 | 1.37 | 1.61 | 1.27 | 1.34 | 1.74 | 2.16 |
+
+Median and geometric mean are over the 20 per-position speedups; pooled = sum of the 1-thread medians / sum of the
+N-thread medians (it is weighted by the heavy positions: mg4 5.9 s, op5 5.7 s, op4 3.5 s and mg7 2.8 s of the 25.4 s
+total). "Pooled speedup (min ms)" repeats the pooled figure with the fastest of the 7 repetitions per cell, as a
+check against interference. "Pooled throughput vs 1T" is main nodes per second summed over positions, relative to 1 thread.
+
+| threads | ideal | pooled speedup | efficiency (pooled/threads) |
+|---|---|---|---|
+| 1 | 1.00 | 1.00 | 1.00 |
+| 2 | 2.00 | 0.89 | 0.45 |
+| 4 | 4.00 | 1.56 | 0.39 |
+| 8 | 8.00 | 1.61 | 0.20 |
+
+```
+1T |#### 1.00x (ideal 1x)
+2T |#### 0.89x (ideal 2x)
+4T |###### 1.56x (ideal 4x)
+8T |###### 1.61x (ideal 8x)
+```
+
+Reading the curve:
+
+- 2 threads is slower than 1 thread on 19 of 20 positions (pooled 0.89x); only op2 is faster (1.05x).
+- 4 threads: pooled 1.56x, median position 1.33x, geometric mean 1.27x; 4 of 20 positions are below 1x and 9 are at
+  or above 1.5x (best mg4 1.93x).
+- 8 threads: pooled 1.61x, median 1.34x, geometric mean 1.37x; 5 of 20 are below 1x (best mg4 2.40x). 4 and 8 threads
+  are not distinguishable at this noise level: with the fastest repetition per cell the pooled speedup is 1.82x at 4T
+  and 1.74x at 8T.
+- Speedup is throughput divided by node inflation, to a good approximation: 0.95 / 1.07 = 0.89, 1.84 / 1.18 = 1.56,
+  2.16 / 1.34 = 1.61.
+
+### Why the curve is far below linear
+
+Decomposition, pooled over the 20 positions. The node model asks: if the only losses were node inflation, the serial
+seed move (root move 0, searched alone) and an even split of the rest over the effective workers, at equal speed per
+node, how fast would the search be? Per position, critical path = seed nodes + (parallel-search nodes - seed nodes) /
+workers, and the bound is 1-thread nodes / critical path, summed over positions. Seed nodes come from
+`bench split engine/benchmark/positions.epd <id> 5` (full-window size of root move 0).
+
+| threads | pooled node inflation | node-model bound | measured pooled speedup | residual (measured / bound) |
+|---|---|---|---|---|
+| 2 | 1.07 | 1.77 | 0.89 | 0.50 |
+| 4 | 1.18 | 2.93 | 1.56 | 0.53 |
+| 8 | 1.34 | 4.51 | 1.61 | 0.36 |
+
+(a) **Root moves cannot share a full window with their siblings.** A worker that starts a root move before a good
+score is known searches with a wide window and visits more nodes than the sequential search, which narrows alpha
+as it goes. After the fix this costs 1.07x / 1.18x / 1.34x pooled at 2 / 4 / 8 threads (median position 1.02x / 1.16x /
+1.27x, worst 2.01x on op3 at 8T), and 8 of 20 positions show no inflation even at 8 threads. Before the fix it was
+2.60x on mg7 and 6.84x on mg4 at depth 6, which made two threads slower than one. It grows with the thread count
+because more workers start a root move before the bound arrives. Inflation alone explains a loss of at most 1.34x at 8
+threads, so it is not the main limit any more.
+
+(b) **Uneven subtree sizes and the serial seed.** The original static round-robin split was measured to be only mildly
+unbalanced (busiest worker over mean 1.10 / 1.19 / 1.29 at 2 / 4 / 8 workers, see the diagnosis), and the fix replaced
+it with a shared counter, so what is left is granularity and the serial seed. The seed (one thread, full window) is
+6.1% of the sequential nodes pooled, which costs little overall, but it is 33% to 37% on op2, op6, mg2 and eg4 (25% on
+eg3), which caps those positions near 3x however many workers there are. The largest single root subtree (a full-window
+upper bound from `bench split`) is a median 21% of the parallel node count, range 5% to 66%, which is more than an
+even 1/8 share (12.5%) on 15 of 20 positions, so one root move can keep a worker busy while the others have finished.
+The node model includes the seed but not this granularity, and per-worker idle time after the fix was not
+instrumented, so how much of the residual is imbalance is not measured (hypothesis).
+
+(c) **8 threads is more than the 4 performance cores.** Going from 4 to 8 threads adds only 3% to the pooled speedup
+(1.56x to 1.61x; 1.82x to 1.74x by fastest repetition) and 17% to the pooled throughput (1.84x to 2.16x), although the
+thread count doubles. The hardware-only measurement from the diagnosis agrees: N separate single-thread processes of
+mg7 at depth 6 reached an aggregate 1.9x (N=2), 2.9x (N=4) and 3.0x (N=8) of one process, with each of the 8 running
+at 0.37x of solo speed. Beyond the 4 performance cores the 6 efficiency cores add very little for this search.
+
+(d) **Per-node speed drops when threads share a process (allocator or scheduler, unproven).** The residual of
+0.50 / 0.53 / 0.36 is close to what the identical-work test in the diagnosis found for K threads in one process
+(mg4, depth 6: aggregate 0.78x / 1.69x / 2.0x of one thread, that is 0.39 / 0.42 / 0.25 per thread for K = 2 / 4 / 8),
+and below separate processes (0.82 / 0.57 / 0.51 per process). In other words two threads in one process do less
+total work per second than one thread in the sequential path (measured pooled throughput 0.95x at 2 threads). The
+hot path allocates heavily (every candidate move copies the whole Board, see the diagnosis), so allocator contention
+is the leading hypothesis; `MallocNanoZone=0` made no consistent difference, and how the macOS scheduler treats a
+multi-thread process is the alternative. Removing the Board copies from move generation would test it; that is a
+Board representation change and was not attempted.
+
+### After the fix versus before (indicative; the depths differ)
+
+| position | before the fix (depth 6, one run) | after the fix (depth 5, median of 7) |
+|---|---|---|
+| mg7 speedup at 2 / 4 / 8 threads | 0.39 / 0.80 / 1.29 | 0.82 / 1.65 / 1.96 |
+| mg7 node inflation | 2.60 / 2.60 / 2.60 | 1.05 / 1.13 / 1.17 (depth 6: 1.04 / 1.06 / 1.09) |
+| mg4 speedup at 8 threads | 0.38 | 2.40 (2 / 4 threads: 0.97 / 1.93) |
+| mg4 node inflation at 8 threads | 6.84 | 1.00 (depth 6: 2.51) |
+
+The depth-6 after-fix node counts are exact counts from single runs; no valid after-fix depth-6 timing exists.
 
 ### Before the fix (indicative, one run per cell, AC power, lid open)
 
@@ -149,7 +339,8 @@ Best move and score were identical at every thread count (mg7 `43-21` -80, mg4 `
      one process versus K separate processes, per-thread wall time): solo 28.7 s (thread) and 30.8 s (process);
      K=2 73.9 s versus 37.5 s; K=4 68.0 s versus 54.5 s; K=8 114.4 s versus 60.5 s. Putting threads in one process
      costs 1.97x / 1.25x / 1.89x on top of the hardware effect, and K=2 threads in one process finish less total work
-     per second (0.78x) than one thread. Separate processes reach 1.64x / 2.26x / 4.07x.
+     per second (0.78x) than one thread. Separate processes reach 1.64x / 2.26x / 4.07x. (This test used a throwaway `bench thr` subcommand that is not committed: K `std::thread`s each
+     running `AlphaBeta::search(..., 1)` on the same position.)
    - `MallocNanoZone=0` did not change this consistently (mg4 depth 5: K=2 15.3 s to 12.7 s, K=4 12.0 s to 13.0 s,
      solo 5.8 s), so the cause is not specific to the nano zone. Whether it is the allocator or how the scheduler
      treats a multi-thread process is not established (hypothesis).
@@ -184,3 +375,47 @@ Checks after the fix (node counts are not timings, so they are valid even though
   ThreadSanitizer reports no race in `ParallelSearchTest.*`.
 - Kiwipete was dropped from that test: its sequential reference search with quiescence takes over a minute even at
   depth 2.
+
+### Bullet
+
+Reached 1.56× speedup on 4 threads at fixed depth 5 while returning the same move by **...**
+
+Suggested phrasing for the missing clause: "by searching the first root move alone, then handing the other root
+moves to workers one at a time with a window narrowed by the best score so far (same best move and score on all 20
+positions, 560 runs)".
+
+Qualifiers to keep next to the number: 1.56x is the pooled speedup over 20 positions (median position 1.33x), 2 threads is
+slower than 1 thread (0.89x), and 8 threads is no better than 4 (1.61x). Depth 5 rather than 6, see the top of this
+section.
+
+### Caveats
+
+- Depth 5, not C1's depth 6; the depth-6 after-fix timing could not be taken (the machine slept).
+- Multi-thread cells are noisy (median 20% to 27% spread between the 7 repetitions, worst 137%) because the machine
+  carried about 17 GB of swap and background daemons; medians of 7 and a fastest-repetition check are reported, and
+  they differ by 0.1x to 0.3x at 4 and 8 threads.
+- The pooled figures are dominated by four heavy positions (mg4, op5, op4, mg7); eg3 and eg4 take 1 to 5 ms and are
+  dominated by thread start-up.
+- Per-worker idle time and the cause of the in-process slowdown were not instrumented, so (b) after the fix and (d) are
+  hypotheses backed by the numbers above, not proofs.
+- Node counts for 2, 4 and 8 threads are not deterministic any more (largest spread across repetitions 11.4%, eg6 at
+  8 threads); the sequential count and the returned move and score are.
+
+### Files and reproduce
+
+- `results/c2_runs.csv`: every run, `rep,id,threads,workers,depth,main_nodes,ms,best_move,score` (560 rows; C3 can
+  compute nodes per second as `main_nodes / ms`).
+- `results/c2_summary.csv`: per (position, thread count) medians, min and max ms, median nodes, speedup and node
+  inflation.
+
+From the repository root (about 10 min at depth 5, about 2 h at depth 6; needs AC power and an open lid, `c2.sh`
+refuses to run otherwise and keeps the machine awake; it appends to `c2_runs.csv`, so delete that file first for a
+fresh run; do not compile or run anything else while it runs):
+
+```
+cmake -S test -B build-bench -DCMAKE_BUILD_TYPE=Release && cmake --build build-bench --target bench -j8 && DEPTH=5 engine/benchmark/c2.sh && python3 -I engine/benchmark/c2_summary.py
+```
+
+`c2_summary.py` prints the tables above, the same-move check (exit status 1 on a mismatch) and writes
+`c2_summary.csv`. The seed-move node counts in (b) come from `bench split engine/benchmark/positions.epd <id> 5` for
+each id in `positions.epd`.

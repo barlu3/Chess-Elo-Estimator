@@ -41,3 +41,14 @@ Elo estimation is planned for this project once benchmarking has been finished.
   * Compiler and flags: Apple clang 21.0.0 (clang-2100.1.1.101), `-O3 -DNDEBUG` (CMake `Release`).
   * Measured at commit `af1bf0b`.
   * Results and the one-command rerun: `engine/benchmark/RESULTS.md`.
+
+* **C2 (thread scaling):** wall-clock speedup of one fixed-depth `AlphaBeta::search` on 1, 2, 4 and 8 threads, alpha-beta + MVV-LVA ordering (`pruning = true`, `ordering = true`) with static-eval leaves (`quiescence = false`), the same configuration as C1.
+  * Depth 5, because 7 repetitions at depth 6 projected to roughly 1.6 to 2.3 h, over the 1.5 h budget. All 20 positions of `engine/benchmark/positions.epd`, 7 repetitions per (position, thread count), 560 runs.
+  * Method: every run is a separate process (`bench time`), interleaved (repetition, then position, then thread count, with the thread order alternating), run by `engine/benchmark/c2.sh`; speedup is median 1-thread ms over median N-thread ms. Effective workers are `min(threads, 10, root moves)`.
+  * Result: pooled speedup 0.89x at 2 threads, 1.56x at 4 and 1.61x at 8 (median position 0.83x, 1.33x, 1.34x); best move and score identical across 1, 2, 4 and 8 threads on all 20 positions and all repetitions.
+  * CPU: Apple M5, 10 cores (4 performance + 6 efficiency).
+  * Compiler and flags: Apple clang 21.0.0 (clang-2100.1.1.101), `-O3 -DNDEBUG` (CMake `Release`).
+  * macOS 26.6.2 (25G83).
+  * Machine state: AC power, lid open, about 17 GB of 17 to 18 GB swap in use (other apps) and system daemons active during the run, so multi-thread cells are noisy (median spread between repetitions 20% to 27%).
+  * Measured at commit `aa7f76a`. The parallel root search changed at commit `9832a84` (seed root move 0, then dynamic hand-out with narrowed windows; before it, node counts were 2.6x to 6.8x the sequential search at depth 6). C1 is unaffected because it used 1 thread (1-thread node counts re-checked identical on op1, mg2, eg5, mg4 and mg7).
+  * Raw runs: `engine/benchmark/results/c2_runs.csv`; summary `c2_summary.csv`; results, explanation and the one-command rerun: `engine/benchmark/RESULTS.md`.
