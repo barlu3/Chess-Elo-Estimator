@@ -2,6 +2,7 @@
 #include "api/moveHistory.h"
 #include "search/MoveExecutor.h"
 #include "search/header/alphabeta.h"
+#include "search/header/ordering.h"
 
 #include <algorithm>
 #include <atomic>
@@ -59,6 +60,15 @@ static std::vector<Position> loadPositions(const std::string& path) {
     return positions;
 }
 
+static const Position& findPosition(const std::vector<Position>& positions, const std::string& id) {
+    const Position* found = nullptr;
+    for (const Position& p : positions) {
+        if (p.id == id) { found = &p; break; }
+    }
+    CHECK(found != nullptr);
+    return *found;
+}
+
 // Counts the nodes a full-width search visits, with no evaluation.
 static long long treeCount(Game& game, MoveHistory& history, int depth) {
     if (depth == 0) return 1;
@@ -101,7 +111,7 @@ static long long negamaxNodes(const Game& root, int depth) {
     return total.load();
 }
 
-static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool ordering, double& ms) {
+static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool ordering, double& ms, int threads = 1) {
     Game g = game;
     MoveHistory history;
     AlphaBeta::pruning = pruning;
@@ -109,7 +119,7 @@ static SearchResult timedSearch(const Game& game, int depth, bool pruning, bool 
     AlphaBeta::quiescence = false; // C1 compares main-search nodes with static-eval leaves
 
     auto start = std::chrono::steady_clock::now();
-    SearchResult result = AlphaBeta::search(g, history, depth, 1);
+    SearchResult result = AlphaBeta::search(g, history, depth, threads);
     ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 
     AlphaBeta::pruning = true;
@@ -140,13 +150,7 @@ static void printSearch(const char* label, const Game& game, int depth, bool ord
 static int probe(const std::string& path, const std::string& id) {
     printBuildInfo();
     std::vector<Position> positions = loadPositions(path);
-
-    const Position* found = nullptr;
-    for (const Position& p : positions) {
-        if (p.id == id) { found = &p; break; }
-    }
-    CHECK(found != nullptr);
-    const Game& game = found->game;
+    const Game& game = findPosition(positions, id).game;
 
     printSearch("mvv", game, 5, true);
     printSearch("ab", game, 5, false);
@@ -158,6 +162,53 @@ static int probe(const std::string& path, const std::string& id) {
     double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     std::printf("negamax d5 nodes=%lld s=%.2f\n", nodes, s);
     std::fflush(stdout);
+    return 0;
+}
+
+static int timeRun(const std::string& path, const std::string& id, int depth, int threads) {
+    CHECK(depth >= 1 && threads >= 1);
+    std::vector<Position> positions = loadPositions(path);
+    const Game& game = findPosition(positions, id).game;
+
+    // Mirrors the worker clamp in AlphaBeta::search; keep in sync.
+    size_t hw = std::thread::hardware_concurrency();
+    size_t workers = std::min({(size_t)threads, hw == 0 ? 1 : hw, MoveExecutor::generateMoves(game).size()});
+
+    double ms = 0;
+    SearchResult r = timedSearch(game, depth, true, true, ms, threads);
+    std::printf("%s,%d,%zu,%d,%lld,%.3f,%d%d-%d%d,%lld\n", id.c_str(), threads, workers, depth, r.mainNodes, ms,
+                r.bestMove.fromRow, r.bestMove.fromCol, r.bestMove.toRow, r.bestMove.toCol, r.score);
+    std::fflush(stdout);
+    return 0;
+}
+
+// Full-window subtree size per ordered root move, for load-imbalance analysis.
+static int splitRun(const std::string& path, const std::string& id, int depth) {
+    CHECK(depth >= 1);
+    std::vector<Position> positions = loadPositions(path);
+    const Game& game = findPosition(positions, id).game;
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = false;
+
+    Game g = game;
+    MoveHistory history;
+    std::vector<Move> moves = MoveExecutor::generateMoves(g);
+    MoveOrder::orderMoves(moves, g.getBoard());
+    const long long INF = static_cast<long long>(1e18);
+    for (size_t i = 0; i < moves.size(); i++) {
+        if (!MoveExecutor::make(moves[i], g, history)) continue;
+        AlphaBeta::nodes = 0;
+        AlphaBeta::alphabeta(g, history, depth - 1, -INF, INF);
+        MoveExecutor::undo(g, history);
+        std::printf("%s,%zu,%lld\n", id.c_str(), i, AlphaBeta::nodes);
+    }
+    std::fflush(stdout);
+
+    AlphaBeta::pruning = true;
+    AlphaBeta::ordering = true;
+    AlphaBeta::quiescence = true;
     return 0;
 }
 
@@ -288,6 +339,9 @@ int main(int argc, char** argv) {
     std::string cmd = argc > 1 ? argv[1] : "";
     if (cmd == "probe" && argc == 4) return probe(argv[2], argv[3]);
     if (cmd == "run" && argc == 4) return run(argv[2], argv[3]);
-    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n");
+    if (cmd == "time" && argc == 6) return timeRun(argv[2], argv[3], std::atoi(argv[4]), std::atoi(argv[5]));
+    if (cmd == "split" && argc == 5) return splitRun(argv[2], argv[3], std::atoi(argv[4]));
+    std::fprintf(stderr, "usage: bench probe <epd> <id>\n       bench run <epd> <csv>\n"
+                         "       bench time <epd> <id> <depth> <threads>\n       bench split <epd> <id> <depth>\n");
     return 1;
 }
