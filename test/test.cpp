@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <algorithm> 
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 
@@ -1766,6 +1767,84 @@ TEST(IterDeepTest, DeterministicSimplePosition) {
     EXPECT_EQ(r1.score, r2.score)
         << "IterDeep is non-deterministic on identical simple positions";
 }
+
+static bool isLegalRootMove(const Game& game, const Move& m) {
+    for (const Move& c : MoveExecutor::generateMoves(game))
+        if (c.fromRow == m.fromRow && c.fromCol == m.fromCol && c.toRow == m.toRow && c.toCol == m.toCol) return true;
+    return false;
+}
+static const char* KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"; // very busy: one quiescence search takes seconds
+
+// The time limit is a hard deadline: a busy position must return close to the limit
+TEST(IterDeepTest, HardDeadlineStopsBusyMiddlegame) {
+    Game game;
+    MoveHistory history;
+    ASSERT_TRUE(game.loadFEN(KIWIPETE));
+
+    auto start = std::chrono::steady_clock::now();
+    SearchResult result = IterDeep::search(game, history, 50, 1, 8);
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+
+    EXPECT_LT(elapsedMs, 150);
+    EXPECT_TRUE(isLegalRootMove(game, result.bestMove));
+    EXPECT_EQ(history.moveHistoryVector.size(), 0u);
+}
+
+// Even when the first depth is cut off, the result must be a real legal move
+TEST(IterDeepTest, HardDeadlineNeverReturnsSentinel) {
+    for (int limit : {1, 5, 20}) {
+        Game seq, par;
+        MoveHistory h1, h2;
+        ASSERT_TRUE(seq.loadFEN(KIWIPETE));
+        ASSERT_TRUE(par.loadFEN(KIWIPETE));
+
+        SearchResult s = IterDeep::search(seq, h1, limit, 1, 8);
+        EXPECT_NE(s.bestMove.fromRow, -1) << "sequential, limit " << limit;
+        EXPECT_TRUE(isLegalRootMove(seq, s.bestMove)) << "sequential, limit " << limit;
+
+        SearchResult p = IterDeep::search(par, h2, limit, 1, 8, 4);
+        EXPECT_NE(p.bestMove.fromRow, -1) << "4 threads, limit " << limit;
+        EXPECT_TRUE(isLegalRootMove(par, p.bestMove)) << "4 threads, limit " << limit;
+    }
+}
+
+// An aborted search must not leave the engine's global state changed
+TEST(IterDeepTest, HardDeadlineLeavesNoStateBehind) {
+    Game g;
+    MoveHistory h;
+
+    SearchResult before = AlphaBeta::search(g, h, 2);
+
+    Game kiwi;
+    MoveHistory kh;
+    ASSERT_TRUE(kiwi.loadFEN(KIWIPETE));
+    IterDeep::search(kiwi, kh, 5, 1, 8);
+
+    SearchResult after = AlphaBeta::search(g, h, 2);
+
+    EXPECT_EQ(before.score, after.score);
+    EXPECT_EQ(before.mainNodes, after.mainNodes);
+    EXPECT_EQ(before.quiescenceNodes, after.quiescenceNodes);
+    EXPECT_FALSE(AlphaBeta::stopped.load());
+    EXPECT_TRUE(AlphaBeta::deadline == std::chrono::steady_clock::time_point::max());
+}
+
+// depth reports the last completed depth
+TEST(IterDeepTest, ReportsCompletedDepth) {
+    Board b = emptyBoard();
+    b.setPiece(7, 4, new King(7, 4, true));
+    b.setPiece(0, 4, new King(0, 4, false));
+    b.setPiece(4, 3, new Pawn(4, 3, true));
+    b.setPiece(3, 4, new Queen(3, 4, false));
+
+    Game g;
+    g.setBoard(b); g.setTurn(true);
+    MoveHistory h;
+
+    SearchResult result = IterDeep::search(g, h, 5000, 1, 3);
+    EXPECT_EQ(result.depth, 3);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PST TESTS — add these to test/test.cpp
 // Include at top: #include "../engine/eval/pst.h"

@@ -5,6 +5,7 @@
 
 #include "search/MoveExecutor.h"
 
+#include "search/header/alphabeta.h"
 #include "search/header/quiescence.h"
 #include "eval/material.h"
 
@@ -13,6 +14,7 @@
 //ensures that we care about captures instead of moves that have little to no affect on the game
 long long Quiescence::quiescence(Game& game, MoveHistory& history, long long alpha, long long beta, int checkDepth) {
     nodes++;
+    if (AlphaBeta::timeUp(nodes)) return 0;
     bool inCheck = game.getBoard().isInCheck(game.isWhiteTurn());
     
     //only take standPat if not in check, otherwise we need to find a legal move to get out

@@ -18,6 +18,7 @@
 
 long long AlphaBeta::alphabeta(Game& game, MoveHistory& history, int depth, long long alpha, long long beta) {
     nodes++;
+    if (timeUp(nodes)) return 0;
     if (depth == 0) return quiescence ? Quiescence::quiescence(game, history, alpha, beta, 1) : Evaluator::evaluate(game);
 
     std::vector<Move> moves = MoveExecutor::generateMoves(game);
@@ -72,6 +73,7 @@ SearchResult AlphaBeta::search(Game& game, MoveHistory& history, int depth, int 
 
             MoveExecutor::undo(game, history);
 
+            if (stopped.load(std::memory_order_relaxed)) break;   //score is from an aborted subtree, keep only the root moves finished so far
             if (score > result.score) {
                 result.score = score;
                 result.bestMove = move;
